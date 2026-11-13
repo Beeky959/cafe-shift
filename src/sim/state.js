@@ -124,6 +124,7 @@ export function createInitialState(options = {}) {
       spotTicks: { waiting: 0, asking: 0 },
       allSpotsFullTicks: 0,
       guests: { served: 0, leftHappy: 0, leftUnhappy: 0, walkedPast: 0 },
+      tips: 0,
     },
   };
 }

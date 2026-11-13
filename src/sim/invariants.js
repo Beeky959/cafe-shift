@@ -213,6 +213,7 @@ export function checkInvariants(state) {
     ...Object.values(state.metrics.spotTicks),
     ...Object.values(state.metrics.guests),
     state.metrics.allSpotsFullTicks,
+    state.metrics.tips,
   ];
   must(counters.every(wholeNonNegative), 'a metric is negative or not a whole number');
 

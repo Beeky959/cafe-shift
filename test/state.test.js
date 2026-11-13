@@ -18,8 +18,8 @@ import {
  * the new value must be reviewed and recorded here on purpose.
  */
 const PINNED = {
-  none: 'f95c5e831d48c5a4',
-  'test-stand': 'fb9cdb894ece56f0',
+  none: 'f76ad97ffb398126',
+  'test-stand': '5c6abb45cf171432',
 };
 
 test('smoke: the default starting state is deterministic and pinned', () => {

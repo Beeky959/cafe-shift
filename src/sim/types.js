@@ -96,6 +96,7 @@
  * @property {number | null} attendedBy Id of the owner action targeting this guest. Patience is frozen while set.
  * @property {number} patienceLeft
  * @property {number} timerLeft Ticks left in a timed state (walking, consuming, stand use).
+ * @property {boolean} tipEligible Set at hand-over: served with more than half their patience left.
  */
 
 /** @typedef {'brewStart' | 'plate' | 'handOver' | 'answer' | 'wipe' | 'wash'} OwnerActionKind */
@@ -118,6 +119,7 @@
  * @property {OwnerActionKind} kind
  * @property {'travelling' | 'working'} phase
  * @property {number} ticksLeft
+ * @property {string} zone Station the action takes place at.
  * @property {number | null} reservedDishId Dish taken from the rack by a start-brew or plate action.
  * @property {ActionClaims} claims
  */
@@ -162,6 +164,7 @@
  * @property {{ waiting: number, asking: number }} spotTicks
  * @property {number} allSpotsFullTicks
  * @property {{ served: number, leftHappy: number, leftUnhappy: number, walkedPast: number }} guests
+ * @property {number} tips Number of tips received.
  */
 
 /**
@@ -210,6 +213,28 @@
  * @property {Owner} owner
  * @property {Economy} economy
  * @property {Metrics} metrics
+ */
+
+/**
+ * Something the player can tap. Guests are targeted through the counter spot
+ * they occupy, never directly.
+ * @typedef {{ kind: 'machine' }
+ *   | { kind: 'case' }
+ *   | { kind: 'sink' }
+ *   | { kind: 'spot', index: number }
+ *   | { kind: 'table', tableId: number }} Target
+ */
+
+/**
+ * Player input for one tick.
+ * @typedef {{ type: 'tap', target: Target }
+ *   | { type: 'cancel' }
+ *   | { type: 'unqueue', actionId: number }} Command
+ */
+
+/**
+ * A fact reported by the step function. `tick` and `seq` order events totally.
+ * @typedef {{ tick: number, seq: number, type: string, [detail: string]: string | number | boolean | null }} SimEvent
  */
 
 export {};

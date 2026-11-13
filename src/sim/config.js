@@ -49,6 +49,8 @@ export const CONFIG = deepFreeze({
   tables: 3,
   dishes: 5,
   machineSlots: 1,
+  /** Taps that may wait behind the owner's current action. */
+  queueMax: 2,
   startingWallet: 0,
   guestLooks: 6,
   ownerStartZone: 'counter',
@@ -74,7 +76,9 @@ export const CONFIG = deepFreeze({
 
   seatSeconds: { min: 8, max: 12 },
 
-  prices: { latte: 8, croissant: 6, tip: 3 },
+  prices: { latte: 8, croissant: 6, tip: 4 },
+  /** A seated guest tips if served with more than this share of their counter patience left. */
+  tipPatienceFraction: 0.35,
   moodBonusMax: 30,
 
   /** Topics a stand could answer, and topics it never answers. */

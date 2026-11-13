@@ -1,8 +1,8 @@
 {
   "name": "byte-builds-cafe-shift",
-  "version": "0.3.2-m0",
+  "version": "0.4.0-m1",
   "private": true,
-  "description": "Byte Builds: Café Shift. Browser café-management game. Milestone M0 scaffold.",
+  "description": "Byte Builds: Café Shift. Browser café-management game. Milestone M1: headless simulation.",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -13,6 +13,7 @@
     "typecheck": "tsc -p jsconfig.json",
     "verify": "node tools/verify-legacy.mjs",
     "verify:legacy": "node tools/verify-legacy.mjs",
+    "balance": "node tools/balance.mjs",
     "check": "npm run typecheck && npm test && npm run verify",
     "check:browser": "node tools/browser-check.cjs"
   },

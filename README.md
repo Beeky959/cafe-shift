@@ -2,7 +2,7 @@
 
 A small browser café-management game featuring Byte. Plain HTML, CSS, JavaScript ES modules and Canvas 2D. No framework, no backend, no runtime dependencies.
 
-**Status: Milestone M0 (scaffold).** The page shows an empty scene and the simulation's starting state. There is no gameplay yet. The plan is in `docs/BUILD_PLAN.md`.
+**Status: Milestone M1 (headless simulation).** The café's rules run and are tested without any visuals: brewing, serving, dishes, tables, patience, questions answered by the owner, scripted players and balance gates B1–B4. The page still shows an empty scene; the playable scene is M2. The plan is in `docs/BUILD_PLAN.md` and M1's results are in `docs/M1_RESULTS.md`.
 
 ## Requirements
 
@@ -18,6 +18,7 @@ A small browser café-management game featuring Byte. Plain HTML, CSS, JavaScrip
 | `npm test` | Runs the automated tests with Node's built-in test runner |
 | `npm run typecheck` | Type-checks all JavaScript through JSDoc annotations (`tsc -p jsconfig.json`, nothing is compiled) |
 | `npm run verify` | Confirms the files in `legacy/` still match their recorded SHA-256 (`verify:legacy` is the same command) |
+| `npm run balance` | Plays the shift with the four scripted players and reports gates B1–B4, plus a 20-seed summary for context |
 | `npm run check` | Typecheck, tests and legacy verification together |
 | `npm run check:browser` | Loads the page headlessly at 1280×800 and 360×640 and fails on console errors, failed requests, page scroll or a state fingerprint that differs from Node's. See "Browser check" below |
 
@@ -34,15 +35,7 @@ Then run `npm run check:browser`.
 
 ### Lockfile
 
-`package-lock.json` is **not yet in the repository**. It could not be generated where this milestone was built, because that environment has no access to the npm registry. On a machine with network access, run once:
-
-```
-npm install
-git add package-lock.json
-git commit -m "Add dependency lockfile"
-```
-
-From then on use `npm ci`. Until that commit exists, `npm ci` fails by design.
+`package-lock.json` is committed (generated on Windows with npm 11). Use `npm ci` for a clean, locked install.
 
 **Open the game through the local server.** Opening `index.html` straight from disk (`file://`) is not supported: browsers block module loading there.
 
@@ -62,13 +55,15 @@ src/sim/              rules. No DOM, canvas, audio, clock or unseeded randomness
   rng.js              seeded random numbers
   schedule.js         seeded guest schedule for a shift
   state.js            starting state
+  step.js             one tick of the rules: commands in, events out
+  replay.js           play a whole shift, or replay a recorded one
   invariants.js       ownership, reverse-reference and accounting rules, checkable on any state
   digest.js           stable state fingerprint
   types.js            JSDoc type definitions
   index.js            public surface
 src/view/renderer.js  canvas sizing and the placeholder scene
-test/                 automated tests
-tools/                static server, legacy verification, optional browser check
+test/                 automated tests; test/support holds the scripted players and test helpers
+tools/                static server, legacy verification, balance report, browser check
 docs/                 audit, design, technical blueprint, build plan, review reconciliation
 legacy/               the original V0.2 prototype. Reference only. Never edited
 ```
@@ -94,7 +89,7 @@ The same seed, shift and preset always give the same starting state, in Node and
 
 | Preset | Fingerprint |
 |---|---|
-| `none` | `f95c5e831d48c5a4` |
-| `test-stand` | `fb9cdb894ece56f0` |
+| `none` | `f76ad97ffb398126` |
+| `test-stand` | `5c6abb45cf171432` |
 
 A changed fingerprint means the config, the schedule generator or the state shape changed. Update the pinned value only on purpose.

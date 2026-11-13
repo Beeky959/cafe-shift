@@ -25,6 +25,7 @@ const guest = (id, state, place, dishId) => ({
   attendedBy: null,
   patienceLeft: 100,
   timerLeft: 0,
+  tipEligible: false,
 });
 
 /**
@@ -39,6 +40,7 @@ const action = (id, kind, claims, reservedDishId = null) => ({
   kind,
   phase: 'working',
   ticksLeft: 5,
+  zone: 'counter',
   reservedDishId,
   claims: { guestId: null, slot: null, pass: false, tableId: null, sinkDishId: null, ...claims },
 });

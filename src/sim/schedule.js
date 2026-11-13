@@ -34,9 +34,9 @@ function validateShift(shift) {
   if (
     shift.firstArrivalSeconds < 0 ||
     shift.lastArrivalSeconds < shift.firstArrivalSeconds ||
-    shift.lastArrivalSeconds > shift.lengthSeconds
+    shift.lastArrivalSeconds >= shift.lengthSeconds
   ) {
-    throw new RangeError(`Shift "${shift.id}": arrival times must lie inside the shift`);
+    throw new RangeError(`Shift "${shift.id}": arrivals must start at or after 0 and end before the doors close`);
   }
 }
 

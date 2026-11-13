@@ -65,6 +65,7 @@ test('invalid input is rejected', () => {
   assert.throws(() => buildSchedule({ ...shift, croissantGuests: 99 }, 1), RangeError);
   assert.throws(() => buildSchedule({ ...shift, supportedQuestionGuests: 14 }, 1), RangeError);
   assert.throws(() => buildSchedule({ ...shift, lastArrivalSeconds: 999 }, 1), RangeError);
+  assert.throws(() => buildSchedule({ ...shift, lastArrivalSeconds: shift.lengthSeconds }, 1), RangeError);
   assert.throws(() => buildSchedule({ ...shift, standUseFraction: 2 }, 1), RangeError);
 });
 

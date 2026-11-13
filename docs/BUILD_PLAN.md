@@ -16,6 +16,7 @@ This is the smallest thing that can answer all four questions in the brief: is i
 - **Gate:** tests pass, including a deterministic-initial-state test with a pinned fingerprint; typecheck passes; the page loads from the local static server at desktop size and at 360×640 with no uncaught console errors, no failed local requests and no page scroll; the browser shows the same state fingerprint as Node; `legacy/` hashes verify. Loading from `file://` is not supported and not claimed.
 
 ### M1 — Simulation, no visuals
+- **Status:** built. Results and open risks are in `docs/M1_RESULTS.md`.
 - **Build:** the step function, state machines and events from TECH_BLUEPRINT.md §3–4 for the core loop: arrivals, brewing, plating, hand-over, tables, dishes, and manual digital-question behaviour: guests who ask the owner about Wi-Fi, the menu, Instagram, reviews or the website, and are answered by the owner. Four scripted players (section 3). **No stand rules:** the step function rejects a state with the stand installed until M4. *(Corrected after the M0 review.)*
 - **Depends on:** M0.
 - **Gate:** all rule tests pass; invariants hold through 10,000 random commands; `checkInvariants` returns nothing after every tick of every test, scripted run and fuzz run, including runs that cancel actions, let guests run out of patience and end the shift during an action; the same seed and commands produce the same event log; balance gates B1–B4 pass. B5–B6 are not part of M1.
