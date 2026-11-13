@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#211e24">
+<title>Byte Builds: Café Shift</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="src/styles.css">
+</head>
+<body>
+<div class="app" id="app">
+  <header class="hud">
+    <strong class="hud-title">Byte Builds / Café Shift</strong>
+    <span class="hud-tag">M0 scaffold</span>
+  </header>
+
+  <main class="stage">
+    <canvas id="scene" aria-label="Café scene. Empty in this milestone."></canvas>
+  </main>
+
+  <div class="strip" id="action-strip" aria-label="Action queue. Empty in this milestone."></div>
+
+  <p class="caption" id="byte-caption">Scaffold only. The café opens in a later milestone.</p>
+
+  <section class="status" id="status" aria-label="Simulation status" data-ready="false">
+    <h2>Simulation foundation</h2>
+    <dl id="status-list"></dl>
+    <noscript>This page needs JavaScript.</noscript>
+  </section>
+</div>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

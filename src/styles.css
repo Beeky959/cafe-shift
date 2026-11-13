@@ -1,0 +1,116 @@
+/* Byte Builds: Café Shift. Palette carried over from the prototype in legacy/. */
+:root {
+  --ink: #24212b;
+  --paper: #fff9ed;
+  --cream: #fceccd;
+  --orange: #ff7700;
+  --lime: #d6fa88;
+  --night: #17171f;
+  --hud-h: 44px;
+  --strip-h: 48px;
+  --caption-h: 56px;
+  --status-min: 120px;
+  font-family: ui-rounded, 'Arial Rounded MT Bold', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--ink);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--night);
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.app {
+  height: 100vh;
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: var(--hud-h) auto var(--strip-h) var(--caption-h) minmax(0, 1fr);
+  justify-items: center;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.hud {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 12px;
+  background: #fdf4e2;
+  border-bottom: 3px solid #312b2a;
+  font-size: 14px;
+}
+
+.hud-tag {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #9a6a32;
+}
+
+.stage {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  background: #0f0f15;
+}
+
+/* One 4:3 scene, scaled uniformly. Full width on a phone, capped on desktop. */
+#scene {
+  display: block;
+  width: min(100vw, 960px, calc((100dvh - var(--hud-h) - var(--strip-h) - var(--caption-h) - var(--status-min)) * 4 / 3));
+  aspect-ratio: 4 / 3;
+  touch-action: none;
+}
+
+.strip {
+  width: 100%;
+  background: #2b262f;
+  border-top: 2px solid #40384a;
+}
+
+.caption {
+  width: 100%;
+  margin: 0;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  background: #30303a;
+  color: #f8f2e7;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.status {
+  width: 100%;
+  max-width: 960px;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 14px 14px;
+  color: #e9dfd2;
+  font-size: 12px;
+}
+
+.status h2 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--lime);
+}
+
+.status dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 14px;
+}
+
+.status dt { color: #a99f93; }
+.status dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.status dd.bad { color: #ff9d8f; }
