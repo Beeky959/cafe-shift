@@ -9,26 +9,40 @@
 <link rel="stylesheet" href="src/styles.css">
 </head>
 <body>
-<div class="app" id="app">
-  <header class="hud">
-    <strong class="hud-title">Byte Builds / Café Shift</strong>
-    <span class="hud-tag">Simulation only</span>
+<div class="app" id="app" data-phase="intro">
+  <header class="hud" aria-label="Shift status">
+    <div class="stat"><span class="stat-label">Time</span><strong id="hud-time">0:00</strong></div>
+    <div class="stat"><span class="stat-label">Coins</span><strong id="hud-coins">0</strong></div>
+    <div class="stat"><span class="stat-label">Happy</span><strong id="hud-happy">0</strong></div>
+    <div class="stat"><span class="stat-label">Lost</span><strong id="hud-lost">0</strong></div>
+    <button class="hud-button" id="pause-button" type="button">Pause</button>
   </header>
 
   <main class="stage">
-    <canvas id="scene" aria-label="Café scene. Empty in this milestone."></canvas>
+    <div class="scene-wrap">
+      <canvas id="scene" aria-hidden="true"></canvas>
+      <div class="targets" id="targets" role="group" aria-label="Café stations, counter spots and tables"></div>
+    </div>
   </main>
 
-  <div class="strip" id="action-strip" aria-label="Action queue. Empty in this milestone."></div>
+  <div class="strip" id="action-strip" role="group" aria-label="What you are doing, and what is next"></div>
 
-  <p class="caption" id="byte-caption">No playable scene yet. The rules run headlessly; the scene arrives in a later milestone.</p>
+  <p class="caption"><span class="byte-name">Byte</span><span id="byte-text" role="status"></span></p>
 
-  <section class="status" id="status" aria-label="Simulation status" data-ready="false">
-    <h2>Simulation foundation</h2>
-    <dl id="status-list"></dl>
-    <noscript>This page needs JavaScript.</noscript>
-  </section>
+  <div class="help">
+    <p>Orange dashed outlines show what you can do right now. Tap an item in your list to cancel it.</p>
+    <p class="help-keys">Keys: <kbd>1</kbd> machine · <kbd>2</kbd> pastry case · <kbd>3</kbd> sink · <kbd>4</kbd>–<kbd>6</kbd> counter · <kbd>7</kbd>–<kbd>9</kbd> tables · <kbd>C</kbd> cancel · <kbd>P</kbd> pause</p>
+  </div>
 </div>
+
+<div class="overlay" id="overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="overlay-title">
+    <h1 id="overlay-title"></h1>
+    <div id="overlay-body"></div>
+    <button class="mainbtn" id="overlay-button" type="button"></button>
+  </div>
+</div>
+<noscript>This game needs JavaScript.</noscript>
 <script type="module" src="src/main.js"></script>
 </body>
 </html>

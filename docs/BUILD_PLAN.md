@@ -22,6 +22,7 @@ This is the smallest thing that can answer all four questions in the brief: is i
 - **Gate:** all rule tests pass; invariants hold through 10,000 random commands; `checkInvariants` returns nothing after every tick of every test, scripted run and fuzz run, including runs that cancel actions, let guests run out of patience and end the shift during an action; the same seed and commands produce the same event log; balance gates B1–B4 pass. B5–B6 are not part of M1.
 
 ### M2 — Scene and input
+- **Status:** built. Results and open risks are in `docs/M2_RESULTS.md`.
 - **Build:** renderer with pixel-ratio scaling and cached background, 4:3 layout, hit areas, pointer input, HUD. Entities drawn in static poses with progress bars only.
 - **Depends on:** M1.
 - **Gate:** Shift 2 is completable by tapping on a phone; 100 scripted taps on valid targets produce 100 commands; no scrolling at 360×640; the layout data passes the 360 px rules in TECH_BLUEPRINT.md §6 (48 px minimum, 8 px gaps, no overlaps, near-miss and tie-break behaviour).

@@ -2,7 +2,20 @@
 
 A small browser café-management game featuring Byte. Plain HTML, CSS, JavaScript ES modules and Canvas 2D. No framework, no backend, no runtime dependencies.
 
-**Status: Milestone M1 (headless simulation).** The café's rules run and are tested without any visuals: brewing, serving, dishes, tables, patience, questions answered by the owner, scripted players and balance gates B1–B4. The page still shows an empty scene; the playable scene is M2. The plan is in `docs/BUILD_PLAN.md` and M1's results are in `docs/M1_RESULTS.md`.
+**Status: Milestone M2 (playable interface).** One 75-second shift can be played with mouse, touch or keyboard. Poses are static and progress is shown with bars; animation is M3 and the TapIt stand is M4. The plan is in `docs/BUILD_PLAN.md`; results are in `docs/M1_RESULTS.md` and `docs/M2_RESULTS.md`.
+
+## Play it
+
+```
+npm start
+```
+
+Then open http://127.0.0.1:5173/ in a browser.
+
+- **Tap or click** the coffee machine, pastry case, sink, a guest at the counter, or a table. Orange dashed outlines show what can be done right now.
+- **Your list** under the scene shows what you are doing and the next two things. Tap an item to cancel it.
+- **Keys:** `1` machine, `2` pastry case, `3` sink, `4`–`6` counter spots, `7`–`9` tables, `C` cancel, `P` or `Esc` pause. `Tab` moves between the same targets as real buttons.
+- **On a phone:** run `npm run start:lan` and open the address it prints from a phone on the same Wi-Fi. This makes the game reachable by other devices on that network until you stop it, so use it only on a network you trust.
 
 ## Requirements
 
@@ -15,12 +28,13 @@ A small browser café-management game featuring Byte. Plain HTML, CSS, JavaScrip
 |---|---|
 | `npm ci` | Installs the development-only tools exactly as locked: TypeScript, Node's type definitions and Playwright. Needs `package-lock.json`; see "Lockfile" below |
 | `npm start` | Serves the project at http://127.0.0.1:5173/ (`node tools/serve.mjs 8080` for another port) |
+| `npm run start:lan` | The same, reachable from other devices on your network, for testing on a phone |
 | `npm test` | Runs the automated tests with Node's built-in test runner |
 | `npm run typecheck` | Type-checks all JavaScript through JSDoc annotations (`tsc -p jsconfig.json`, nothing is compiled) |
 | `npm run verify` | Confirms the files in `legacy/` still match their recorded SHA-256 (`verify:legacy` is the same command) |
 | `npm run balance` | Plays the shift with the four scripted players and reports gates B1–B4, plus a 20-seed summary for context |
 | `npm run check` | Typecheck, tests and legacy verification together |
-| `npm run check:browser` | Loads the page headlessly at 1280×800 and 360×640 and fails on console errors, failed requests, page scroll or a state fingerprint that differs from Node's. See "Browser check" below |
+| `npm run check:browser` | Plays the game headlessly with real mouse, touch and keyboard input at 1280×800, 360×640 and 640×360, and fails on errors, failed requests, page scroll, small touch targets, lost input, or a result that differs from the same commands replayed in Node. See "Browser check" below |
 
 `npm start`, `npm test` and `npm run verify` need no install. `npm run typecheck` and `npm run check:browser` need `npm ci` first.
 
@@ -42,13 +56,14 @@ Then run `npm run check:browser`.
 ### Development settings in the address bar
 
 - `?seed=12345` uses another schedule seed.
-- `?preset=test-stand` starts with the stand installed. This is a test-only preset for comparing the same shift with and without the stand; the campaign never uses it.
+- `?debug` exposes `window.cafeShift` for the browser check: the state, the command log, a speed control and a scripted player. It is not linked from the game.
 
 ## Layout
 
 ```
 index.html            entry point
-src/main.js           wiring between page, view and simulation
+src/main.js           wiring between page, input, view and game
+src/game.js           the loop: input to commands, fixed ticks, results
 src/styles.css
 src/sim/              rules. No DOM, canvas, audio, clock or unseeded randomness
   config.js           every tunable number
@@ -61,7 +76,12 @@ src/sim/              rules. No DOM, canvas, audio, clock or unseeded randomness
   digest.js           stable state fingerprint
   types.js            JSDoc type definitions
   index.js            public surface
-src/view/renderer.js  canvas sizing and the placeholder scene
+src/view/scene.js     layout as data: hit areas, hit testing, keys
+src/view/renderer.js  draws the café from the simulation state
+src/view/art.js       drawing helpers ported from the prototype
+src/ui/dom.js         HUD, target buttons, action strip, overlay: created once, updated in place
+src/ui/labels.js      words for actions, targets and refusals
+src/ui/byte.js        Byte's lines
 test/                 automated tests; test/support holds the scripted players and test helpers
 tools/                static server, legacy verification, balance report, browser check
 docs/                 audit, design, technical blueprint, build plan, review reconciliation
