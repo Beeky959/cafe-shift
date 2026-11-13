@@ -13,15 +13,36 @@ A small browser café-management game featuring Byte. Plain HTML, CSS, JavaScrip
 
 | Command | What it does |
 |---|---|
-| `npm install` | Installs the two development-only tools: TypeScript and Node's type definitions |
+| `npm ci` | Installs the development-only tools exactly as locked: TypeScript, Node's type definitions and Playwright. Needs `package-lock.json`; see "Lockfile" below |
 | `npm start` | Serves the project at http://127.0.0.1:5173/ (`node tools/serve.mjs 8080` for another port) |
 | `npm test` | Runs the automated tests with Node's built-in test runner |
 | `npm run typecheck` | Type-checks all JavaScript through JSDoc annotations (`tsc -p jsconfig.json`, nothing is compiled) |
-| `npm run verify:legacy` | Confirms the files in `legacy/` still match their recorded SHA-256 |
+| `npm run verify` | Confirms the files in `legacy/` still match their recorded SHA-256 (`verify:legacy` is the same command) |
 | `npm run check` | Typecheck, tests and legacy verification together |
-| `npm run check:browser` | Optional. Loads the page headlessly at 1280×800 and 360×640 and fails on console errors, failed requests, page scroll or a wrong state fingerprint. Needs Playwright available to Node; it is not a project dependency. Set `CHROME_PATH` to use an installed Chrome |
+| `npm run check:browser` | Loads the page headlessly at 1280×800 and 360×640 and fails on console errors, failed requests, page scroll or a state fingerprint that differs from Node's. See "Browser check" below |
 
-`npm start`, `npm test` and `npm run verify:legacy` need no install.
+`npm start`, `npm test` and `npm run verify` need no install. `npm run typecheck` and `npm run check:browser` need `npm ci` first.
+
+### Browser check
+
+Playwright is a development dependency, but it does not include a browser. Do one of these once:
+
+- `npx playwright install chromium` downloads Playwright's own Chromium (roughly 150 MB), or
+- set `CHROME_PATH` to an installed Chrome or Chromium, for example `CHROME_PATH="C:\Program Files\Google\Chrome\Application\chrome.exe"`.
+
+Then run `npm run check:browser`.
+
+### Lockfile
+
+`package-lock.json` is **not yet in the repository**. It could not be generated where this milestone was built, because that environment has no access to the npm registry. On a machine with network access, run once:
+
+```
+npm install
+git add package-lock.json
+git commit -m "Add dependency lockfile"
+```
+
+From then on use `npm ci`. Until that commit exists, `npm ci` fails by design.
 
 **Open the game through the local server.** Opening `index.html` straight from disk (`file://`) is not supported: browsers block module loading there.
 
@@ -41,7 +62,7 @@ src/sim/              rules. No DOM, canvas, audio, clock or unseeded randomness
   rng.js              seeded random numbers
   schedule.js         seeded guest schedule for a shift
   state.js            starting state
-  invariants.js       ownership and accounting rules, checkable on any state
+  invariants.js       ownership, reverse-reference and accounting rules, checkable on any state
   digest.js           stable state fingerprint
   types.js            JSDoc type definitions
   index.js            public surface
@@ -65,7 +86,7 @@ Two rules are enforced by tests:
 67658822942475d56de8a22aa315ca702f80e14260b7d3ab776fef38100989cd  byte-cafe-shift-v2.html
 ```
 
-All three received files are listed in `legacy/SHA256SUMS`. The game does not load anything from this folder.
+All three received files are listed in `legacy/SHA256SUMS`. The game does not load anything from this folder. `.gitattributes` marks the folder as binary so Git never converts its line endings; keep that file.
 
 ## Determinism
 
@@ -73,7 +94,7 @@ The same seed, shift and preset always give the same starting state, in Node and
 
 | Preset | Fingerprint |
 |---|---|
-| `none` | `e07c41c9965d475a` |
-| `test-stand` | `0a0524c5953d3344` |
+| `none` | `f95c5e831d48c5a4` |
+| `test-stand` | `fb9cdb894ece56f0` |
 
 A changed fingerprint means the config, the schedule generator or the state shape changed. Update the pinned value only on purpose.

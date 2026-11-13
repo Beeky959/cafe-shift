@@ -32,8 +32,11 @@
  */
 
 /**
- * Where a dish is. Exactly one holder at any tick.
+ * Where a dish is. Exactly one holder at any tick. `reserved` means the dish
+ * has left the rack and is in the owner's hands for the action named, which
+ * must be the owner's current start-brew or plate action.
  * @typedef {{ kind: 'rack' }
+ *   | { kind: 'reserved', actionId: number }
  *   | { kind: 'machine', slot: number }
  *   | { kind: 'pass' }
  *   | { kind: 'guest', guestId: number }
@@ -49,15 +52,83 @@
 /**
  * @typedef {object} MachineSlot
  * @property {'empty' | 'brewing' | 'ready'} state
- * @property {number | null} dishId
+ * @property {number | null} dishId Reverse reference of a dish held by this slot.
  * @property {number} ticksLeft
+ * @property {number | null} claimedBy Id of the hand-over action taking this latte.
+ */
+
+/**
+ * @typedef {object} Pass
+ * @property {number | null} dishId Reverse reference of the plated croissant's dish.
+ * @property {number | null} claimedBy Id of the hand-over action taking this croissant.
  */
 
 /**
  * @typedef {object} Table
  * @property {number} id
  * @property {'clean' | 'occupied' | 'dirty' | 'wiping'} state
+ * @property {number | null} guestId Reverse reference of a guest walking to or seated at this table.
+ * @property {number | null} claimedBy Id of the wipe action working on this table.
+ */
+
+/**
+ * Where a live guest is. Exactly one place at any tick, mirrored by the
+ * container that lists the guest (counter spot, door queue, stand, table).
+ * @typedef {{ kind: 'spot', index: number }
+ *   | { kind: 'door' }
+ *   | { kind: 'stand' }
+ *   | { kind: 'table', tableId: number }
+ *   | { kind: 'standing' }} GuestPlace
+ */
+
+/**
+ * @typedef {'walkingIn' | 'waiting' | 'asking' | 'walkingToStand' | 'atStand'
+ *   | 'walkingToTable' | 'seated' | 'standing'} GuestState
+ */
+
+/**
+ * A guest who is in the café. Guests who have left are removed.
+ * @typedef {object} LiveGuest
+ * @property {number} id Matches a GuestSpec id.
+ * @property {GuestState} state
+ * @property {GuestPlace} place
+ * @property {number | null} dishId Reverse reference of the dish this guest holds.
+ * @property {number | null} attendedBy Id of the owner action targeting this guest. Patience is frozen while set.
+ * @property {number} patienceLeft
+ * @property {number} timerLeft Ticks left in a timed state (walking, consuming, stand use).
+ */
+
+/** @typedef {'brewStart' | 'plate' | 'handOver' | 'answer' | 'wipe' | 'wash'} OwnerActionKind */
+
+/**
+ * What the current action has claimed without holding it. Each claim is
+ * mirrored on its target (`attendedBy` or `claimedBy`).
+ * @typedef {object} ActionClaims
+ * @property {number | null} guestId Hand-over or answer.
+ * @property {number | null} slot Start-brew (an empty slot) or hand-over (a ready latte).
+ * @property {boolean} pass Plate (the empty pass) or hand-over (a ready croissant).
+ * @property {number | null} tableId Wipe.
+ * @property {number | null} sinkDishId Wash: the dirty dish being washed. It stays in the sink until done.
+ */
+
+/**
+ * The owner's current action.
+ * @typedef {object} OwnerAction
+ * @property {number} id
+ * @property {OwnerActionKind} kind
+ * @property {'travelling' | 'working'} phase
+ * @property {number} ticksLeft
+ * @property {number | null} reservedDishId Dish taken from the rack by a start-brew or plate action.
+ * @property {ActionClaims} claims
+ */
+
+/**
+ * A queued action. It reserves and claims nothing until it starts.
+ * @typedef {object} QueuedAction
+ * @property {number} id
+ * @property {OwnerActionKind} kind
  * @property {number | null} guestId
+ * @property {number | null} tableId
  */
 
 /**
@@ -70,8 +141,9 @@
 /**
  * @typedef {object} Owner
  * @property {string} zone Station the owner is at.
- * @property {null} action Current action. Always null in M0; defined in M1.
- * @property {never[]} queue Queued actions. Always empty in M0; defined in M1.
+ * @property {OwnerAction | null} action
+ * @property {QueuedAction[]} queue
+ * @property {number} nextActionId
  */
 
 /**
@@ -127,13 +199,13 @@
  * @property {Timing} timing
  * @property {GuestSpec[]} schedule
  * @property {number} nextArrivalIndex
- * @property {never[]} guests Live guests. Always empty at tick 0; defined in M1.
+ * @property {LiveGuest[]} guests Guests in the café. Empty at tick 0.
  * @property {number[]} doorQueue
  * @property {(number | null)[]} spots Guest id per counter spot.
  * @property {Table[]} tables
  * @property {Dish[]} dishes
  * @property {{ slots: MachineSlot[] }} machine
- * @property {{ dishId: number | null }} pass
+ * @property {Pass} pass
  * @property {Stand} stand
  * @property {Owner} owner
  * @property {Economy} economy

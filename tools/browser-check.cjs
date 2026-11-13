@@ -3,9 +3,10 @@
  * headless browser at desktop size and at 360x640, and fails on any console
  * error, uncaught exception, failed request, page scroll or wrong fingerprint.
  *
- * Needs Playwright to be resolvable by Node. It is not a project dependency.
+ * Playwright is a development dependency (installed by `npm ci`). It also
+ * needs a browser: run `npx playwright install chromium` once, or set
+ * CHROME_PATH to an installed Chrome or Chromium.
  *   node tools/browser-check.cjs [screenshot-folder]
- *   CHROME_PATH=/path/to/chrome   use an installed browser instead of Playwright's
  */
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -14,11 +15,16 @@ const VIEWPORTS = [
   { name: 'desktop-1280x800', width: 1280, height: 800, scale: 1, touch: false },
   { name: 'phone-360x640', width: 360, height: 640, scale: 3, touch: true },
 ];
-const EXPECTED = { none: 'e07c41c9965d475a', 'test-stand': '0a0524c5953d3344' };
 
 async function main() {
   const { chromium } = require('playwright');
   const { startServer } = await import(pathToFileURL(path.join(__dirname, 'serve.mjs')).href);
+  // Expected fingerprints come from the same simulation running in Node.
+  const sim = await import(pathToFileURL(path.join(__dirname, '..', 'src', 'sim', 'index.js')).href);
+  const EXPECTED = {
+    none: sim.digest(sim.createInitialState()),
+    'test-stand': sim.digest(sim.createInitialState({ preset: 'test-stand' })),
+  };
   const shots = process.argv[2] ? path.resolve(process.argv[2]) : null;
   const server = await startServer(0);
   const browser = await chromium.launch({

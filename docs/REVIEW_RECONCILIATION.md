@@ -13,6 +13,23 @@ Corrections made after the independent review (verdict: approve with changes). T
 | 7 | Mobile interaction at 360 px | Layout budget at 360×640; ten fixed targets; 48 px minimum, 8 px gaps, no overlaps; near-miss tolerance and tie-break order; selection on `pointerdown`; invalid taps send no command; guests targeted through fixed spots | TECH_BLUEPRINT §6; BUILD_PLAN M2 gate |
 | 8 | Animation phases vs simulation state | Phase table: move and work loops display the simulation's own progress; settles and exit walks are visual only, bounded, and can never delay the rules. The view never leads the simulation | TECH_BLUEPRINT §5 |
 
+## Corrections after the M0 review (M0.1)
+
+- **Gates by milestone:** B1–B4 belong to M1; B5–B6 belong to M4, because they need the stand's rules. BUILD_PLAN M1, M4 and §3 corrected. The earlier recommendation of "M1 with B1–B6" was wrong.
+- **Line endings:** `.gitattributes` marks `legacy/**` as binary. Without it, a checkout with Git's Windows line-ending conversion changed the prototype's bytes and failed hash verification.
+- **Shift 3 stream reuse:** implementation keys streams by shift id; noted in TECH_BLUEPRINT §3 as work for M6.
+- **Stand use share:** the design says about 3 in 4; the slice config gives 5 of 6 guests with a supported question (4.5 rounded up). To be settled when M1 tunes the config.
+
+## Final M0 fixes (after the independent M0 review: pass with fixes)
+
+| # | Fix | Result |
+|---|---|---|
+| 1 | Milestone ownership | **M1** implements and tests B1–B4 and includes manual digital-question behaviour (guests ask, the owner answers), with no stand. **M4** implements TapIt behaviour and tests B5–B6, and re-runs B1–B4. The paired run (`none` against `test-stand`, same seed) is a test harness, separate from campaign progression; the campaign never passes a preset. BUILD_PLAN §1, M1, M4 and §3 |
+| 2 | Dish ownership and lifecycle | A `reserved` holder for the dish in the owner's hands during a start-brew or plate action; nine named transitions D1–D9; holding distinguished from claiming; reverse references for dishes, guests, tables, counter spots, the stand and the current action; invariants for cancellation, abandonment and shift termination. GAME_DESIGN §3a, TECH_BLUEPRINT §4. Defined executably in `src/sim/types.js` and `src/sim/invariants.js`, with tests in `test/ownership.test.js`. No step function was added |
+| 3 | Reproducible setup | Browser-test dependency declared; `npm run verify` added; browser installation documented; Git repository initialised with `legacy/` marked binary. Lockfile status is recorded in the README |
+
+The state shape gained claim and action fields, so the pinned fingerprints changed on purpose: `none` is now `f95c5e831d48c5a4` and `test-stand` is `fb9cdb894ece56f0`.
+
 ## Not changed
 
 - GAME_AUDIT.md: findings stand as written.

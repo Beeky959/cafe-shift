@@ -57,16 +57,34 @@ Every dish, guest, counter spot and table has exactly one holder at any tick. *(
 
 **Dishes**
 
-| Holder | A dish enters when | A dish leaves when |
-|---|---|---|
-| Rack, clean | The shift starts; a wash completes | Start-brew or plating begins and reserves it |
-| Machine slot | Start-brew completes | Hand-over of that latte completes |
-| Pastry pass, holds one | Plating completes | Hand-over of that croissant completes |
-| Guest | Hand-over completes | The guest leaves, for any reason |
-| Sink, dirty | A guest holding it leaves | The wash of that dish completes |
+*(Corrected in the final M0 fixes: a reserved holder and the complete transition list.)*
 
+| Holder | Meaning | Mirrored by |
+|---|---|---|
+| Rack | Clean and available | Nothing |
+| Reserved | Taken from the rack and in the owner's hands for the current start-brew or plate action | That action's reserved dish |
+| Machine slot | Under a brewing or ready latte | The slot's dish |
+| Pastry pass, holds one | Under a plated croissant | The pass's dish |
+| Guest | With a guest who has been served | The guest's dish |
+| Sink | Dirty | Nothing |
+
+These are the only permitted moves:
+
+| # | From → to | When |
+|---|---|---|
+| D1 | Rack → reserved | A start-brew or plate action starts |
+| D2 | Reserved → machine slot | Start-brew completes |
+| D3 | Reserved → pass | Plating completes |
+| D4 | Reserved → rack | That action is cancelled, or the shift ends during it |
+| D5 | Machine slot → guest | Hand-over of that latte completes |
+| D6 | Pass → guest | Hand-over of that croissant completes |
+| D7 | Guest → sink | The guest leaves for any reason: finished, out of patience while asking, or settled at shift end |
+| D8 | Sink → rack | The wash of that dish completes |
+| D9 | Machine slot or pass → rack | Shift end only: unserved items are discarded |
+
+- **Holding and claiming are different.** A hand-over claims a ready item and a wash claims a dirty dish, but the dish stays with the machine, pass or sink until the action completes. Cancelling such an action moves nothing.
 - A prepared item whose guest has gone stays where it is and goes to the next guest with the same order. Nothing spoils in the first release.
-- Rack + machine + pass + guests + sink always equals the total.
+- Rack + reserved + machine + pass + guests + sink always equals the total.
 
 **Counter spots and the door**
 
@@ -89,21 +107,31 @@ Every dish, guest, counter spot and table has exactly one holder at any tick. *(
 
 | Action | Checked and reserved when it starts | Committed when it completes | If cancelled |
 |---|---|---|---|
-| Start brew | An empty machine slot and one clean dish | Slot is brewing with that dish | Dish back to the rack; slot empty |
-| Plate croissant | The empty pass and one clean dish | Pass holds the croissant | Dish back to the rack |
-| Hand over | The guest and the matching ready item | Dish to guest; payment; guest moves on | Nothing moves; patience resumes |
+| Start brew | Claims an empty machine slot; reserves one clean dish (D1) | Slot is brewing with that dish (D2) | Dish back to the rack (D4); slot released |
+| Plate croissant | Claims the empty pass; reserves one clean dish (D1) | Pass holds the croissant (D3) | Dish back to the rack (D4); pass released |
+| Hand over | Claims the guest and the matching ready item | Dish to guest (D5 or D6); payment; guest moves on | Claims released; nothing moves; patience resumes |
 | Answer | The asking guest | Guest moves on | Progress lost; patience resumes |
 | Wipe | The dirty table | Table clean | Table dirty; progress lost |
-| Wash | One dirty dish at a time | That dish to the rack; the next begins | Current dish stays dirty; finished dishes stay clean |
+| Wash | Claims one dirty dish at a time | That dish to the rack (D8); the next begins | Current dish stays in the sink; finished dishes stay clean |
 
 - Queued actions reserve nothing. Each is checked when it starts; if it is no longer valid it is dropped and reported.
 - A brew that has started on the machine cannot be cancelled.
 
+**Abandonment**
+
+- A waiting guest who runs out of patience holds no dish. Their spot is released on that tick. Anything already prepared for them stays for the next matching order.
+- An asking guest who runs out of patience leaves with nothing owed: their dish goes to the sink (D7) and their spot is released.
+- An attended guest cannot run out of patience, so the target of the owner's current action never disappears under it.
+- A queued action whose target has gone is dropped when it would have started.
+
 **End of shift**
 
 - Doors close at the shift length: no more arrivals. Play continues until no guest is waiting, asking or at the stand, so every guest gets an outcome. *(Corrected: in the prototype, late guests could never be lost.)*
-- Guests still seated or standing are then settled as happy at once: tips paid, dishes to the sink.
-- Any owner action in progress is dropped and its reservation released. Only the wallet and upgrades carry to the next shift.
+- The shift then ends in this order, on one tick:
+  1. The owner's current action is cancelled (D4 for a reserved dish; every claim released) and the queue is cleared.
+  2. Unserved items on the machine and the pass are discarded and their dishes return to the rack (D9).
+  3. Guests still walking to a table, seated or standing are settled as happy: tips paid, dishes to the sink (D7), tables left dirty.
+- Afterwards there are no guests, no actions and no claims, and every dish is in the rack or the sink. Only the wallet and upgrades carry to the next shift.
 
 ## 4. Owner actions and starting numbers
 

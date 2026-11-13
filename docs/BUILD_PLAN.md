@@ -4,21 +4,21 @@ Order matters. Each milestone has a gate; work does not move on until it passes.
 
 ## 1. The vertical slice
 
-**Shift 2 only, playable twice: once without the stand and once with it.** The second play uses the test-only preset `test-stand` (TECH_BLUEPRINT.md §3), which starts the same seeded shift with the stand installed. The preset is not reachable from the campaign, where the stand first appears in Shop B. *(Corrected after review.)* One 75-second shift, the full task chain (brew, serve, tables, dishes), questions, the stand, and a results card comparing the two plays. Reused prototype art, no new art, no Shift 1, no Shift 3, no Shop A.
+**Shift 2 only, playable twice: once without the stand and once with it.** The second play uses the test-only preset `test-stand` (TECH_BLUEPRINT.md §3), which starts the same seeded shift with the stand installed. The preset is not reachable from the campaign, where the stand first appears in Shop B. *(Corrected after review.)* The paired run is a test harness and is separate from campaign progression: campaign code creates shifts without a preset, and a test asserts that. One 75-second shift, the full task chain (brew, serve, tables, dishes), questions, the stand, and a results card comparing the two plays. Reused prototype art, no new art, no Shift 1, no Shift 3, no Shop A.
 
 This is the smallest thing that can answer all four questions in the brief: is it enjoyable, does feedback satisfy, is there real prioritisation, and is the stand's use understood.
 
 ## 2. Milestones
 
 ### M0 — Scaffold
-- **Build:** repository and module folders; the prototype byte-for-byte under `legacy/` with its filename kept and its SHA-256 recorded and verified by a test; a zero-dependency static server; simulation foundation (`config`, `rng`, `schedule`, `state`, `invariants`, `digest`) with no DOM, canvas, audio or clock; JSDoc typecheck; documented commands.
+- **Build:** repository and module folders; the prototype byte-for-byte under `legacy/` with its filename kept and its SHA-256 recorded and verified by a test; a committed dependency lockfile and a declared browser-test dependency; a zero-dependency static server; simulation foundation (`config`, `rng`, `schedule`, `state`, `invariants`, `digest`) with no DOM, canvas, audio or clock; JSDoc typecheck; documented commands.
 - **Depends on:** nothing. The start conditions in section 5 gate M1 onward.
 - **Gate:** tests pass, including a deterministic-initial-state test with a pinned fingerprint; typecheck passes; the page loads from the local static server at desktop size and at 360×640 with no uncaught console errors, no failed local requests and no page scroll; the browser shows the same state fingerprint as Node; `legacy/` hashes verify. Loading from `file://` is not supported and not claimed.
 
 ### M1 — Simulation, no visuals
-- **Build:** config, seeded schedule, state machines and events from TECH_BLUEPRINT.md §3–4; four scripted players (section 3).
+- **Build:** the step function, state machines and events from TECH_BLUEPRINT.md §3–4 for the core loop: arrivals, brewing, plating, hand-over, tables, dishes, and manual digital-question behaviour: guests who ask the owner about Wi-Fi, the menu, Instagram, reviews or the website, and are answered by the owner. Four scripted players (section 3). **No stand rules:** the step function rejects a state with the stand installed until M4. *(Corrected after the M0 review.)*
 - **Depends on:** M0.
-- **Gate:** all rule tests pass; invariants hold through 10,000 random commands; the same seed and commands produce the same event log; balance gates B1–B6 pass.
+- **Gate:** all rule tests pass; invariants hold through 10,000 random commands; `checkInvariants` returns nothing after every tick of every test, scripted run and fuzz run, including runs that cancel actions, let guests run out of patience and end the shift during an action; the same seed and commands produce the same event log; balance gates B1–B4 pass. B5–B6 are not part of M1.
 
 ### M2 — Scene and input
 - **Build:** renderer with pixel-ratio scaling and cached background, 4:3 layout, hit areas, pointer input, HUD. Entities drawn in static poses with progress bars only.
@@ -31,9 +31,9 @@ This is the smallest thing that can answer all four questions in the brief: is i
 - **Gate:** clip-selection tests pass for every state; no completion effect without a completion event in a replayed log; cancel, overlap and repeat cases from TECH_BLUEPRINT.md §5 demonstrated; frame budget met on the test phone.
 
 ### M4 — Questions and the stand
-- **Build:** asking guests, the stand, the phone-tap sequence, the Shop B card, the results comparison, Byte's hint rules.
+- **Build:** TapIt behaviour: the stand's rules in the simulation and the paired-run comparison (`none` against `test-stand`, same seed) as a test harness; visuals for asking guests and the stand; the phone-tap sequence, the Shop B card, the results comparison, Byte's hint rules.
 - **Depends on:** M3, and confirmed TapIt facts (section 5).
-- **Gate:** balance gates B5–B6 pass in the running build; the stand cannot be used by the player to resolve a request; all on-screen claims match the approved wording.
+- **Gate:** balance gates B5–B6 pass, and B1–B4 still pass; the stand cannot be used by the player to resolve a request; all on-screen claims match the approved wording.
 
 ### M5 — Slice playtest. Decision point
 - **Build:** nothing new. Run the test in section 4.
@@ -47,7 +47,7 @@ This is the smallest thing that can answer all four questions in the brief: is i
 - **Build:** accessibility pass (focus order, reduced motion, contrast, labels), browser matrix, copy review against the claims list, load size check.
 - **Gate:** works on the agreed browsers; total download under 300 KB; no console errors; disclaimers present.
 
-## 3. Balance gates (automated, in M1 and M4)
+## 3. Balance gates (automated: B1–B4 in M1, B5–B6 in M4)
 
 Scripted players act at human speed, one action per second unless stated.
 
@@ -101,7 +101,7 @@ Results are recorded by hand. No analytics are added to the game.
 | Rules | Every transition in the state tables; invariants | Node's built-in test runner, no dependencies |
 | Determinism | Same seed and commands give the same events | Replay test |
 | Robustness | 10,000 random commands | Fuzz test with invariant checks |
-| Balance | B1–B6 | Scripted players, run on every config change |
+| Balance | B1–B4 from M1, B5–B6 from M4 | Scripted players, run on every config change |
 | Animation contract | State to clip; completion effects need completion events | Pure function tests and log replay |
 | Input | Tap to command on real layout sizes | Scripted pointer events in a headless browser, development only |
 | Devices | Phone portrait and landscape, desktop | Manual matrix on the agreed browsers |

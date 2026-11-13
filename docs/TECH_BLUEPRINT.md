@@ -70,7 +70,7 @@ pointer → input → command → sim.step(state, dt, commands) → events
 - Arrivals: a fixed number of guests, evenly spaced between the first and last arrival times, each moved by a bounded jitter, rounded to whole ticks, then sorted. Ids are assigned in arrival order.
 - Orders, questions and stand use are **exact counts** dealt by seeded shuffle. Question topics are dealt round-robin from a shuffled list, so every supported topic appears.
 - Whether a guest would use the stand is fixed in the schedule and independent of whether a stand exists. The same seed therefore gives the same guests with the stand off and on.
-- Shift 3 reuses Shift 2's streams and adds its extra guests from a separate stream.
+- Shift 3 reuses Shift 2's streams and adds its extra guests from a separate stream. Streams are currently keyed by the shift's own id, which is correct while only one shift exists; M6 must key them by a named schedule source so that Shift 3 can point at Shift 2's. *(Noted after the M0 review.)*
 
 ### Test-only stand preset *(added after review)*
 
@@ -132,7 +132,43 @@ Walking in, walking to a table and walking to the stand are timed simulation sta
 
 **Stand:** absent → placed → idle ⇄ in use.
 
-**Invariants, tested continuously:** clean + in use + dirty dishes equals the total; a customer is in exactly one place; no timer is negative; a counter spot holds at most one customer; wallet equals starting wallet plus gross earnings minus coins spent.
+### Ownership model and reverse references *(added in the final M0 fixes)*
+
+- **Hold:** exclusive possession. A dish has exactly one holder; a guest has exactly one place.
+- **Claim:** the owner's current action marks something it will change on completion without holding it. Claims exist only while that action is current.
+- Every hold and every claim is recorded on both sides, and the two must agree at the end of every tick.
+
+| Forward reference | Reverse reference |
+|---|---|
+| Dish holder is `reserved` by action A | Owner's current action is A, and A's reserved dish is this dish |
+| Dish holder is machine slot S | Slot S's dish is this dish |
+| Dish holder is the pass | The pass's dish is this dish |
+| Dish holder is guest G | Guest G's dish is this dish |
+| Counter spot N lists guest G | G's place is spot N |
+| Door queue lists guest G | G's place is the door |
+| Stand user or stand queue lists guest G | G's place is the stand |
+| Table T lists guest G | G's place is table T (walking to it, or seated) |
+| Action A claims guest G | G is attended by A (patience frozen) |
+| Action A claims machine slot S or the pass | That slot or the pass is claimed by A |
+| Action A claims table T | T is claimed by A and its state is `wiping` |
+| Action A claims a sink dish | That dish's holder is the sink |
+
+A guest who is standing has no container. A guest who has left is removed from the state entirely.
+
+### Invariants M1 must enforce
+
+The executable definition is `checkInvariants` in `src/sim/invariants.js`. M1's tests call it after every tick; it must return nothing.
+
+1. **Dishes:** fixed total; unique ids; one holder each; every row of the table above agrees in both directions; only a current start-brew or plate action holds a reserved dish, and it always holds exactly one.
+2. **Guests:** unique ids; one place each, agreeing with its container; nobody listed who is not in the café; a guest holds a dish if and only if they have been served; state and place are compatible; only waiting or asking guests are attended.
+3. **Claims:** every claim mark on a guest, slot, pass or table names the owner's current action, and that action names it back. With no current action there are no claims.
+4. **Tables:** occupied if and only if a guest is listed; wiping if and only if claimed.
+5. **Cancellation:** after any cancel, the reserved dish is back in the rack, every claim is gone, and nothing else has moved.
+6. **Abandonment:** when a guest leaves, their place, their dish reference and any listing of them are gone on the same tick, and a dish they held is in the sink.
+7. **Shift termination:** in the `ended` phase there are no guests, no current or queued actions and no claims; every dish is in the rack or the sink; no table is occupied or being wiped; every scheduled guest has arrived.
+8. **Money and counters:** wallet equals starting wallet plus gross earnings minus coins spent and is never negative; no metric is negative.
+
+**Summary of the invariants:** clean + in use + dirty dishes equals the total; a customer is in exactly one place; no timer is negative; a counter spot holds at most one customer; wallet equals starting wallet plus gross earnings minus coins spent.
 
 ## 5. Animation system
 

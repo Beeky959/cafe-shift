@@ -86,6 +86,7 @@ export function createInitialState(options = {}) {
       id: i + 1,
       state: /** @type {'clean'} */ ('clean'),
       guestId: null,
+      claimedBy: null,
     })),
     dishes: Array.from({ length: CONFIG.dishes }, (_, i) => ({
       id: i + 1,
@@ -96,11 +97,12 @@ export function createInitialState(options = {}) {
         state: /** @type {'empty'} */ ('empty'),
         dishId: null,
         ticksLeft: 0,
+        claimedBy: null,
       })),
     },
-    pass: { dishId: null },
+    pass: { dishId: null, claimedBy: null },
     stand: { installed: CONFIG.presets[preset].standInstalled, userId: null, queue: [] },
-    owner: { zone: CONFIG.ownerStartZone, action: null, queue: [] },
+    owner: { zone: CONFIG.ownerStartZone, action: null, queue: [], nextActionId: 1 },
     economy: {
       startingWallet: CONFIG.startingWallet,
       grossEarnings: 0,
