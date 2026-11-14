@@ -2,7 +2,7 @@
 
 A small browser café-management game featuring Byte. Plain HTML, CSS, JavaScript ES modules and Canvas 2D. No framework, no backend, no runtime dependencies.
 
-**Status: M2.5 gameplay experiment** (branch `m2.5-order-service-experiment`). Orders are served by hand: pick the ticket, make it at the right station, carry it to the guest. Digital-presence questions look and behave differently from orders, and Byte reacts to what is happening. Built on M2; the simulation is unchanged. See `docs/M2_5_EXPERIMENT.md`.
+**Status: M3 animated café** (branch `m3-animated-cafe`). The M2.5 game with a detailed café, characters drawn from moving parts, and animation for brewing, carrying, serving, washing, wiping, guests and Byte, all driven by the simulation. The simulation is unchanged. A TapIt visual kit is ready at `/tapit-preview.html` but is not part of the game yet. See `docs/M3_RESULTS.md`.
 
 ## Play it
 

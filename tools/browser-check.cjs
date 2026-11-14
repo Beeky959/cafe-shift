@@ -220,8 +220,10 @@ async function main() {
       else await activate('#pause-button');
       check((await phase()) === 'paused', 'did not pause');
       const frozen = await game('s.tick');
+      const frozenClock = await game('g.anim().now()');
       await page.waitForTimeout(300);
       check((await game('s.tick')) === frozen, 'the shift kept running while paused');
+      check((await game('g.anim().now()')) === frozenClock, 'animations kept moving while paused');
       check(await page.isVisible('#overlay'), 'pause overlay is not shown');
       if (shots) await page.screenshot({ path: path.join(shots, `${vp.name}-2-paused.png`) });
       await activate('#overlay-button');
@@ -332,8 +334,76 @@ async function main() {
       check((await page.getAttribute('#app', 'data-final-digest')) === expectedAutoplay, 'scripted play in the browser differs from Node');
 
       check(!requests.some((r) => r.includes('/legacy/')), 'the page loaded something from legacy/');
+      check(!requests.some((r) => r.includes('tapit')), 'the game loaded the TapIt components');
+      const draw = await game('g.drawStats()');
       console.log(`${vp.name}: scene ${Math.round(layout.canvas.w)}x${Math.round(layout.canvas.h)}, smallest target ${Math.round(Math.min(...layout.targets.map((t) => Math.min(t.w, t.h))))} px, ` +
-        `played by ${vp.touch ? 'touch' : 'mouse and keyboard'}, ${final.log.length} command batches replayed, final ${final.digest}`);
+        `played by ${vp.touch ? 'touch' : 'mouse and keyboard'}, ${final.log.length} command batches replayed, final ${final.digest}, ` +
+        `draw ${draw.mean.toFixed(2)} ms mean / ${draw.p95.toFixed(2)} ms p95`);
+      await context.close();
+    }
+    // ---- G. Reduced motion: the game still plays, with nothing failing.
+    {
+      const fail = (what) => failures.push(`reduced-motion: ${what}`);
+      const context = await browser.newContext({ viewport: { width: 360, height: 640 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true, reducedMotion: 'reduce' });
+      const page = await context.newPage();
+      page.on('pageerror', (e) => fail(`uncaught: ${e.message}`));
+      page.on('console', (m) => { if (m.type() === 'error') fail(`console error: ${m.text()}`); });
+      await page.goto(`${server.url}?debug`, { waitUntil: 'load' });
+      await page.waitForFunction(() => Boolean(window.cafeShift));
+      if (!(await page.evaluate(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches))) fail('reduced motion was not applied');
+      await page.tap('#overlay-button');
+      await page.evaluate(async () => {
+        const m = await import('/test/support/players.js');
+        window.cafeShift.setAutoplayer(m.createPlayer('priority'));
+        window.cafeShift.setSpeed(60);
+      });
+      await page.waitForFunction(() => document.getElementById('app').dataset.phase === 'ended', null, { timeout: 30000 }).catch(() => fail('the shift did not end'));
+      if (shots) await page.screenshot({ path: path.join(shots, 'reduced-motion-results.png') });
+      console.log('reduced-motion: played a full shift');
+      await context.close();
+    }
+
+    // ---- H. Performance on a phone-sized screen with the processor slowed four times.
+    {
+      const context = await browser.newContext({ viewport: { width: 360, height: 640 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true });
+      const page = await context.newPage();
+      const cdp = await context.newCDPSession(page);
+      await page.goto(`${server.url}?debug`, { waitUntil: 'load' });
+      await page.waitForFunction(() => Boolean(window.cafeShift));
+      await page.tap('#overlay-button');
+      await page.evaluate(async () => {
+        const m = await import('/test/support/players.js');
+        window.cafeShift.setAutoplayer(m.createPlayer('priority'));
+      });
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+      const frames = await page.evaluate(() => new Promise((done) => {
+        const times = [];
+        let last = performance.now();
+        const step = (now) => {
+          times.push(now - last);
+          last = now;
+          if (times.length < 300) requestAnimationFrame(step);
+          else done(times.slice(30).sort((a, b) => a - b));
+        };
+        requestAnimationFrame(step);
+      }));
+      const draw = await page.evaluate(() => window.cafeShift.drawStats());
+      const p95 = frames[Math.floor(frames.length * 0.95)];
+      console.log(`performance, 360x640 at 4x slower CPU: frame interval median ${frames[Math.floor(frames.length / 2)].toFixed(1)} ms, p95 ${p95.toFixed(1)} ms; draw ${draw.mean.toFixed(2)} ms mean, ${draw.p95.toFixed(2)} ms p95`);
+      if (draw.p95 > 16.7) failures.push(`performance: drawing takes ${draw.p95.toFixed(1)} ms at p95 on a slowed phone-sized screen, over one frame`);
+      await context.close();
+    }
+
+    // ---- I. The TapIt components page loads on its own, without errors.
+    {
+      const context = await browser.newContext({ viewport: { width: 1100, height: 760 } });
+      const page = await context.newPage();
+      page.on('pageerror', (e) => failures.push(`tapit-preview: uncaught: ${e.message}`));
+      page.on('console', (m) => { if (m.type() === 'error') failures.push(`tapit-preview: console error: ${m.text()}`); });
+      await page.goto(`${server.url}tapit-preview.html`, { waitUntil: 'load' });
+      await page.waitForTimeout(800);
+      if (shots) await page.screenshot({ path: path.join(shots, 'tapit-preview.png') });
+      console.log('tapit-preview: loaded');
       await context.close();
     }
   } finally {

@@ -1,31 +1,44 @@
 // @ts-check
 /**
- * Draws the café from the simulation state. The view only reads the state;
- * it never changes it. Poses are static in this milestone: positions and
- * progress bars are the simulation's own timers, displayed.
+ * Draws the café. Every frame is built from three things only:
+ *   1. the simulation state (what is true),
+ *   2. clips chosen from that state (src/view/clips.js),
+ *   3. the animator's memory (src/view/animator.js): eased positions, walk
+ *      cycles, departing guests and one-off effects started by events.
+ * The view only reads; it never changes the simulation.
+ *
+ * Layers, back to front: cached background; stations and Byte; the owner
+ * behind the counter; the cached counter; the floor (tables, guests, the
+ * owner when out front) sorted by depth; bubbles, effects and hit outlines.
  */
 /** @import { SimState, LiveGuest, GuestSpec, OrderItem } from '../sim/types.js' */
 /** @import { Service } from '../ui/service.js' */
+/** @import { Animator } from './animator.js' */
+/** @import { Pose, Face } from './characters.js' */
 import { resolveTap } from '../sim/index.js';
-import { HIT_AREAS, PLACES, SCENE_HEIGHT, SCENE_WIDTH, centreOf } from './scene.js';
+import { HIT_AREAS, SCENE_HEIGHT, SCENE_WIDTH } from './scene.js';
 import * as art from './art.js';
+import { CAST, OWNER, byte, person, sparkle } from './characters.js';
+import { STAGE, clothAt, guestClip, machineClip, ownerClip, passClip, seatOf, sinkClip, tableCentre, tableDirt } from './clips.js';
+import { PROPS, chair, cloth, cupWithFill, dishInHand, drawBackground, drawForeground, drawLightGlow, drawMachine, drawPass, drawRack, drawSink, drawTableTop, steam } from './props.js';
 
 export { SCENE_HEIGHT, SCENE_WIDTH };
 
 /** Backing-store scale is capped so large phones do not pay for 3x pixels. */
 const MAX_PIXEL_RATIO = 2;
+const GUEST_SCALE = 0.95;
+const QUEUE_SCALE = 0.88;
 
 /**
  * Things only the view knows about.
  * @typedef {object} ViewState
  * @property {string | null} hoverId Hit area under a mouse pointer.
  * @property {Map<string, { kind: 'press' | 'reject', until: number }>} flashes Short highlights, by hit area id.
- * @property {number} now Milliseconds, from the frame clock.
+ * @property {number} now Milliseconds, from the frame clock (real time; for press feedback).
  * @property {Service} service Order selection and carrying (interface state only).
  * @property {{ item: OrderItem, x: number, y: number } | null} drag An item being dragged, in scene units.
- * @property {{ x: number, y: number, text: string, color: string, start: number, until: number }[]} effects Short rising labels.
- * @property {Map<number, number>} happyUntil Guests showing a pleased face, by id, until this time.
- * @property {'neutral' | 'happy' | 'alert' | 'sad'} byteMood
+ * @property {Animator} anim
+ * @property {boolean} reducedMotion
  */
 
 /**
@@ -36,91 +49,25 @@ const MAX_PIXEL_RATIO = 2;
  * @property {() => { cssWidth: number, cssHeight: number, pixelRatio: number, scale: number }} metrics
  */
 
-const lerp = (/** @type {number} */ a, /** @type {number} */ b, /** @type {number} */ t) => a + (b - a) * Math.max(0, Math.min(1, t));
+const clamp01 = (/** @type {number} */ v) => Math.max(0, Math.min(1, v));
+const smooth = (/** @type {number} */ t) => {
+  const x = clamp01(t);
+  return x * x * (3 - 2 * x);
+};
 
 /**
  * @param {art.Ctx} cx
+ * @param {OrderItem | 'cup'} item
+ * @param {number} x
+ * @param {number} y
+ * @param {number} [size]
  */
-function drawBackground(cx) {
-  // Wall.
-  const wall = cx.createLinearGradient(0, 0, 0, 330);
-  wall.addColorStop(0, '#f8e4b9');
-  wall.addColorStop(1, '#ecd09a');
-  cx.fillStyle = wall;
-  cx.fillRect(0, 0, SCENE_WIDTH, 330);
-  art.rounded(cx, 0, 0, SCENE_WIDTH, 34, 0, '#c9885a');
-  art.rounded(cx, 0, 34, SCENE_WIDTH, 8, 0, '#85533e');
-  for (let i = 1; i < 15; i++) {
-    cx.strokeStyle = '#c79f7555';
-    cx.lineWidth = 1;
-    cx.beginPath();
-    cx.moveTo(i * 64, 44);
-    cx.lineTo(i * 64, 250);
-    cx.stroke();
-  }
-  // Window.
-  art.rounded(cx, 462, 56, 256, 120, 12, '#623f35');
-  art.rounded(cx, 471, 65, 238, 102, 7, '#b5dcd6');
-  art.poly(cx, [[473, 140], [516, 104], [555, 132], [602, 98], [663, 141], [709, 118], [709, 166], [473, 166]], '#9eafa0');
-  art.rounded(cx, 585, 66, 10, 100, 0, '#6f5142');
-  // Floor.
-  cx.fillStyle = '#d5a178';
-  cx.fillRect(0, 330, SCENE_WIDTH, SCENE_HEIGHT - 330);
-  for (let j = 0; j < 8; j++) {
-    cx.strokeStyle = '#c18c654b';
-    cx.lineWidth = 2;
-    cx.beginPath();
-    cx.moveTo(0, 440 + j * 40);
-    cx.lineTo(SCENE_WIDTH, 440 + j * 40);
-    cx.stroke();
-  }
-  // Door, at the left.
-  art.rounded(cx, -6, 372, 30, 190, 6, '#7a4d3a', '#4a3231', 4);
-  art.oval(cx, 14, 470, 4, 4, '#f2c36b');
-  art.plant(cx, 925, 392, 0.9);
-
-  // Back bar that the stations sit on.
-  art.rounded(cx, 20, 262, 920, 62, 8, '#76483b', '#472f30', 3);
-  // Coffee machine.
-  art.rounded(cx, 62, 176, 136, 96, 10, '#525b5c', '#342c32', 4);
-  art.rounded(cx, 78, 188, 104, 26, 4, '#a7afa7');
-  art.rounded(cx, 96, 250, 68, 14, 3, '#2f2a2e');
-  art.rounded(cx, 118, 222, 24, 18, 3, '#3a3336');
-  // Pastry case.
-  art.rounded(cx, 266, 190, 150, 86, 12, '#c1e5debb', '#7e9790', 4);
-  art.rounded(cx, 280, 236, 122, 26, 5, '#d5ae7d');
-  for (const xx of [300, 341, 382]) art.croissant(cx, xx, 232, 34);
-  // Sink and the rack shelf above it.
-  art.rounded(cx, 758, 232, 144, 62, 10, '#9fb0b3', '#56666a', 4);
-  art.rounded(cx, 772, 244, 116, 40, 8, '#6f8387');
-  art.rounded(cx, 824, 214, 10, 26, 3, '#56666a');
-  art.rounded(cx, 808, 208, 30, 10, 4, '#56666a');
-  art.rounded(cx, 754, 196, 152, 8, 3, '#8b5c42');
-  // Register, where the owner stands for guests.
-  art.rounded(cx, 596, 282, 64, 36, 5, '#37383d', '#20242a', 3);
-  art.rounded(cx, 606, 288, 44, 18, 2, '#a4be86');
-
-  // Front counter.
-  const c = PLACES.counterTop;
-  art.rounded(cx, c.x, c.y, c.w, c.h, 6, '#e2ac70', '#51392f', 5);
-  art.rounded(cx, c.x, c.y + c.h - 4, c.w, 50, 3, '#b57b52', '#5c3e35', 4);
-  for (let x = 80; x < 930; x += 86) {
-    cx.strokeStyle = '#a66d49';
-    cx.lineWidth = 3;
-    cx.beginPath();
-    cx.moveTo(x, c.y + c.h);
-    cx.lineTo(x, c.y + c.h + 44);
-    cx.stroke();
-  }
-  // Floor markers for the three counter spots.
-  for (const area of HIT_AREAS.filter((a) => a.target.kind === 'spot')) {
-    art.oval(cx, area.x + area.w / 2, area.y + area.h - 16, 56, 14, '#b98a6150');
-  }
-  // Table bases.
-  for (const area of HIT_AREAS.filter((a) => a.target.kind === 'table')) {
-    const m = centreOf(area);
-    art.oval(cx, m.x, area.y + area.h - 12, 70, 12, '#44362c30');
-    art.rounded(cx, m.x - 7, m.y + 6, 14, 48, 3, '#6a4636');
+function heldItem(cx, item, x, y, size = 26) {
+  if (item === 'croissant') {
+    art.plate(cx, x, y + 4, size * 1.5, false);
+    art.croissant(cx, x, y - 2, size);
+  } else {
+    cupWithFill(cx, x, y - size * 0.3, size, item === 'cup' ? 0 : 1, item !== 'cup');
   }
 }
 
@@ -133,6 +80,7 @@ export function createRenderer(canvas) {
   if (!context) throw new Error('Canvas 2D is not available in this browser');
   const cx = context;
   const background = document.createElement('canvas');
+  const foreground = document.createElement('canvas');
   let pixelRatio = 1;
   let cssWidth = 0;
   let cssHeight = 0;
@@ -148,62 +96,20 @@ export function createRenderer(canvas) {
       canvas.width = width;
       canvas.height = height;
     }
-    // The static scene is drawn once per size and reused every frame.
-    background.width = width;
-    background.height = height;
-    const bg = background.getContext('2d');
-    if (bg) {
+    // Static layers are drawn once per size and reused every frame.
+    for (const [layer, paint] of /** @type {const} */ ([
+      [background, (/** @type {art.Ctx} */ c) => { drawBackground(c); drawLightGlow(c); }],
+      [foreground, drawForeground],
+    ])) {
+      layer.width = width;
+      layer.height = height;
+      const c = layer.getContext('2d');
+      if (!c) continue;
       const scale = width / SCENE_WIDTH;
-      bg.setTransform(scale, 0, 0, scale, 0, 0);
-      drawBackground(bg);
+      c.setTransform(scale, 0, 0, scale, 0, 0);
+      c.clearRect(0, 0, SCENE_WIDTH, SCENE_HEIGHT);
+      paint(c);
     }
-  }
-
-  /**
-   * @param {SimState} state
-   * @param {LiveGuest} g
-   * @param {number} standingIndex
-   * @returns {{ x: number, y: number, scale: number }}
-   */
-  function guestPosition(state, g, standingIndex) {
-    const p = g.place;
-    if (p.kind === 'spot') {
-      const area = HIT_AREAS.find((a) => a.target.kind === 'spot' && a.target.index === p.index);
-      const x = area ? area.x + area.w / 2 : 0;
-      const y = area ? area.y + 96 : 0;
-      if (g.state === 'walkingIn') {
-        const t = 1 - g.timerLeft / state.timing.walkIn;
-        return { x: lerp(PLACES.door.x, x, t), y: lerp(PLACES.door.y, y, t), scale: 1.7 };
-      }
-      return { x, y, scale: 1.7 };
-    }
-    if (p.kind === 'door') {
-      const slot = PLACES.doorQueue[state.doorQueue.indexOf(g.id)] ?? PLACES.doorQueue[0];
-      return { x: slot.x, y: slot.y, scale: 1.3 };
-    }
-    if (p.kind === 'table') {
-      const area = HIT_AREAS.find((a) => a.target.kind === 'table' && a.target.tableId === p.tableId);
-      const x = area ? area.x + 46 : 0;
-      const y = area ? area.y + 62 : 0;
-      if (g.state === 'walkingToTable') {
-        const t = 1 - g.timerLeft / state.timing.walkToTable;
-        return { x: lerp(SCENE_WIDTH / 2, x, t), y: lerp(480, y, t), scale: 1.3 };
-      }
-      return { x, y, scale: 1.3 };
-    }
-    const slot = PLACES.standing[standingIndex % PLACES.standing.length];
-    return { x: slot.x, y: slot.y, scale: 1.3 };
-  }
-
-  /**
-   * @param {GuestSpec} spec
-   * @param {number} x
-   * @param {number} y
-   * @param {number} s
-   */
-  function orderIcon(spec, x, y, s) {
-    if (spec.order === 'latte') art.cup(cx, x - s * 0.06, y, s);
-    else art.croissant(cx, x, y, s);
   }
 
   /**
@@ -211,180 +117,188 @@ export function createRenderer(canvas) {
    * @param {ViewState} view
    */
   function draw(state, view) {
-    const scale = (cssWidth / SCENE_WIDTH) * pixelRatio;
-    cx.setTransform(1, 0, 0, 1, 0, 0);
-    cx.drawImage(background, 0, 0);
-    cx.setTransform(scale, 0, 0, scale, 0, 0);
-    const action = state.owner.action;
-    const timing = state.timing;
-
+    const anim = view.anim;
+    const motion = view.reducedMotion ? 0 : 1;
+    const time = anim.now() / 1000;
     const service = view.service;
     const carrying = service.carrying();
     const hints = service.hints(state);
+    const timing = state.timing;
+    const scale = (cssWidth / SCENE_WIDTH) * pixelRatio;
+    const playing = state.phase !== 'ended';
+    /** @param {number} id */
+    const specOf = (id) => /** @type {GuestSpec} */ (state.schedule.find((s) => s.id === id));
+    /** @param {art.Ctx} c @param {number} x @param {number} y @param {number} r @param {number | string} label */
+    const tag = (c, x, y, r, label) => art.tag(c, x, y, r, label);
 
-    // ---- Machine.
-    const slot = state.machine.slots[0];
-    if (slot.state === 'brewing') {
-      art.bar(cx, 70, 150, 120, 18, 1 - slot.ticksLeft / timing.brew, '#bee86f');
-      art.cup(cx, 130, 238, 26);
-      const forWhom = service.madeFor('latte');
-      if (forWhom !== null) art.tag(cx, 176, 238, 15, forWhom);
-    } else if (slot.state === 'ready') {
-      const lifted = carrying === 'latte';
-      art.rounded(cx, 60, 146, 140, 26, 13, lifted ? '#ffb03a' : '#bee86f', '#3a2c2c', 3);
-      art.textAt(cx, lifted ? 'IN HAND' : 'READY', 130, 166, 18, '#2c3a12', 1000);
-      if (!(view.drag && view.drag.item === 'latte')) {
-        art.cup(cx, 130, lifted ? 222 : 236, 34, true);
-        const forWhom = service.madeFor('latte');
-        if (forWhom !== null) art.tag(cx, 178, lifted ? 222 : 236, 15, forWhom);
-      }
-    }
+    cx.setTransform(1, 0, 0, 1, 0, 0);
+    cx.drawImage(background, 0, 0);
+    cx.setTransform(scale, 0, 0, scale, 0, 0);
 
-    // ---- Pastry pass: a plated croissant waits in front of the case.
-    if (state.pass.dishId !== null && !(view.drag && view.drag.item === 'croissant')) {
-      const lifted = carrying === 'croissant';
-      art.plate(cx, 340, lifted ? 290 : 302, 64, false);
-      art.croissant(cx, 340, lifted ? 282 : 294, 40);
-      const forWhom = service.madeFor('croissant');
-      if (forWhom !== null) art.tag(cx, 392, lifted ? 286 : 298, 15, forWhom);
-      if (lifted) {
-        art.rounded(cx, 280, 150, 120, 26, 13, '#ffb03a', '#3a2c2c', 3);
-        art.textAt(cx, 'IN HAND', 340, 170, 18, '#2c3a12', 1000);
-      }
-    }
-
-    // ---- Dishes: clean ones on the shelf, dirty ones in the sink.
+    // ---- Stations on the back bar.
+    const mClip = machineClip(state);
+    const brewPulse = anim.progressOf('brewReady');
+    drawMachine(
+      cx,
+      {
+        state: mClip.state,
+        progress: mClip.progress,
+        time: time * motion + (motion ? 0 : 0.3),
+        pulse: brewPulse < 0 ? 0 : 1 - brewPulse,
+        ticket: service.madeFor('latte'),
+        lifted: carrying === 'latte',
+        hidden: view.drag?.item === 'latte',
+      },
+      tag,
+    );
+    const pClip = passClip(state);
+    const platePop = anim.progressOf('plated');
+    drawPass(
+      cx,
+      {
+        plated: pClip.plated,
+        claimed: pClip.claimed,
+        lifted: carrying === 'croissant',
+        hidden: view.drag?.item === 'croissant',
+        ticket: service.madeFor('croissant'),
+        pop: platePop < 0 ? 0 : platePop,
+      },
+      tag,
+    );
     const clean = state.dishes.filter((d) => d.holder.kind === 'rack').length;
-    const dirty = state.dishes.filter((d) => d.holder.kind === 'sink').length;
-    for (let i = 0; i < clean; i++) art.plate(cx, 772 + i * 29, 188, 30, false);
-    for (let i = 0; i < dirty; i++) art.plate(cx, 800 + (i % 3) * 30, 258 + Math.floor(i / 3) * 12, 34, true);
-    if (dirty > 0) {
-      art.oval(cx, 900, 232, 19, 19, '#d9534f');
-      art.textAt(cx, String(dirty), 900, 242, 28, '#fff', 1000);
-    }
-    if (clean === 0) {
-      art.rounded(cx, 762, 160, 136, 30, 8, '#d9534f');
-      art.textAt(cx, 'NO CLEAN DISHES', 830, 181, 15, '#fff', 1000);
+    const washedFly = anim.progressOf('dishWashed');
+    drawRack(cx, washedFly >= 0 ? Math.max(0, clean - 1) : clean, 0);
+    const sClip = sinkClip(state);
+    drawSink(cx, { dirty: sClip.dirty, washing: sClip.washing, time: time * motion });
+    if (washedFly >= 0) {
+      // A washed dish lifts out of the sink and settles into the rack.
+      const to = { x: PROPS.rack.x + 14 + Math.max(0, clean - 1) * 24, y: PROPS.rack.y - 10 };
+      const t = smooth(washedFly);
+      const x = PROPS.sink.basin.x + (to.x - PROPS.sink.basin.x) * t;
+      const y = PROPS.sink.basin.y + (to.y - PROPS.sink.basin.y) * t - Math.sin(t * Math.PI) * 30;
+      art.oval(cx, x, y, 6 + 10 * (1 - t), 14 - 5 * (1 - t), '#fffaf0');
+      sparkle(cx, x + 12, y - 12, 3 * (1 - t) + 1, '#ffffff');
     }
 
-    // ---- Tables.
+    // ---- Byte, hovering by the window.
+    const anxious = state.guests.some((g) => g.place.kind === 'spot' && guestClip(state, g).mood === 'anxious' && g.attendedBy === null);
+    const expression = anim.byteExpression(anxious);
+    const talk = clamp01((anim.byte.talkUntil - anim.now()) / 400);
+    byte(cx, STAGE.byte.x, STAGE.byte.y, 0.74, {
+      expression,
+      hover: Math.sin(time * 2.1) * 3 * motion,
+      blink: anim.byteBlink(),
+      talk,
+      time: time * motion,
+      lookX: anxious ? -0.8 : Math.sin(time * 0.4) * 0.5 * motion,
+    });
+
+    // ---- The owner.
+    const oClip = ownerClip(state);
+    const O = anim.owner;
+    const ownerBehind = O.y < STAGE.behindY + 30;
+    const ownerPose = () => buildOwnerPose(state, oClip, anim, time, motion);
+    if (ownerBehind) person(cx, O.x, O.y, 1, OWNER, ownerPose());
+
+    // ---- The counter, in front of the owner.
+    cx.setTransform(1, 0, 0, 1, 0, 0);
+    cx.drawImage(foreground, 0, 0);
+    cx.setTransform(scale, 0, 0, scale, 0, 0);
+
+    // ---- The floor, back to front.
+    /** @type {{ y: number, draw: () => void }[]} */
+    const floor = [];
     for (const area of HIT_AREAS) {
       if (area.target.kind !== 'table') continue;
       const tableId = area.target.tableId;
-      const table = state.tables.find((t) => t.id === tableId);
-      if (!table) continue;
-      const m = centreOf(area);
-      art.oval(cx, m.x, m.y - 4, 82, 30, table.state === 'dirty' || table.state === 'wiping' ? '#b98a61' : '#e2ac70');
-      cx.strokeStyle = '#51392f';
-      cx.lineWidth = 4;
-      cx.beginPath();
-      cx.ellipse(m.x, m.y - 4, 82, 30, 0, 0, Math.PI * 2);
-      cx.stroke();
-      if (table.state === 'dirty' || table.state === 'wiping') {
-        const fade = table.state === 'wiping' && action ? (action.phase === 'working' ? action.ticksLeft / timing.wipe : 1) : 1;
-        cx.globalAlpha = Math.max(0.15, fade);
-        for (const [dx, dy] of [[-40, -8], [-8, 6], [26, -10], [48, 2]]) art.oval(cx, m.x + dx, m.y + dy - 4, 9, 5, '#6b4630');
+      const c = tableCentre(tableId);
+      floor.push({ y: c.y + 10, draw: () => drawTableGroup(state, view, tableId, time, motion) });
+    }
+    for (const g of state.guests) {
+      if (g.state === 'seated') continue;
+      const body = anim.guests.get(g.id);
+      if (!body) continue;
+      floor.push({ y: body.y, draw: () => drawGuest(state, view, g, body, time, motion) });
+    }
+    for (const ghost of anim.ghosts()) {
+      const at = anim.ghostAt(ghost);
+      floor.push({ y: at.y, draw: () => drawGhost(ghost, at, time, motion, anim) });
+    }
+    if (!ownerBehind) floor.push({ y: O.y, draw: () => person(cx, O.x, O.y, 1, OWNER, ownerPose()) });
+    floor.sort((a, b) => a.y - b.y);
+    for (const item of floor) item.draw();
+
+    // ---- The owner's progress and speech.
+    const action = state.owner.action;
+    if (action && action.phase === 'working') {
+      const bx = O.x - 44;
+      const by = O.y - 190;
+      art.bar(cx, bx, by, 88, 14, oClip.progress, action.kind === 'answer' ? '#6fb3ee' : '#ffb03a');
+      if (action.kind === 'answer' && oClip.guestId !== null) {
+        const spec = specOf(oClip.guestId);
+        const sx = O.x + 40;
+        const sy = O.y - 232;
+        art.rounded(cx, sx, sy, 74, 40, 16, '#dff0ff', '#2f6fb0', 3);
+        art.poly(cx, [[sx + 10, sy + 36], [sx + 22, sy + 38], [sx + 2, sy + 52]], '#2f6fb0');
+        if (spec.question) art.topicIcon(cx, spec.question.topic, sx + 22, sy + 20, 22);
+        for (let i = 0; i < 3; i++) {
+          const on = Math.floor(time * 5 * motion) % 3 >= i || !motion;
+          art.oval(cx, sx + 44 + i * 9, sy + 22, 3, 3, on ? '#2f6fb0' : '#9fc4e6');
+        }
+      }
+    }
+
+    // ---- Bubbles over guests: orders and questions.
+    for (const g of state.guests) {
+      const body = anim.guests.get(g.id);
+      if (!body) continue;
+      if (g.place.kind !== 'spot' && g.place.kind !== 'door') continue;
+      if (g.state !== 'waiting' && g.state !== 'asking' && g.state !== 'walkingIn') continue;
+      drawBubble(state, view, g, body, time, motion);
+    }
+
+    // ---- One-off effects.
+    for (const f of anim.fx()) {
+      const t = clamp01((anim.now() - f.start) / f.duration);
+      if (f.type === 'handoff' && f.x !== undefined && f.y !== undefined && f.x2 !== undefined && f.y2 !== undefined) {
+        const k = smooth(t);
+        const x = f.x + (f.x2 - f.x) * k;
+        const y = f.y + (f.y2 - f.y) * k - Math.sin(k * Math.PI) * 50;
+        heldItem(cx, /** @type {OrderItem} */ (f.item), x, y, 30);
+      } else if (f.type === 'coins' && f.x !== undefined && f.y !== undefined) {
+        cx.globalAlpha = 1 - Math.max(0, t - 0.6) / 0.4;
+        const y = f.y - 46 * smooth(t);
+        const text = f.text ?? '';
+        const w = 30 + text.length * 15;
+        art.rounded(cx, f.x - w / 2, y - 24, w, 34, 12, '#29282cee');
+        art.oval(cx, f.x - w / 2 + 16, y - 7, 9, 9, '#f2b532');
+        art.textAt(cx, text, f.x + 8, y + 2, 22, f.color ?? '#ffe08a', 1000);
+        cx.globalAlpha = 1;
+      } else if (f.type === 'answered' && f.x !== undefined && f.y !== undefined) {
+        cx.globalAlpha = 1 - Math.max(0, t - 0.55) / 0.45;
+        const y = f.y - 40 * smooth(t);
+        art.oval(cx, f.x, y, 20, 20, '#3f9b3a');
+        cx.strokeStyle = '#fff';
+        cx.lineWidth = 5;
+        cx.lineCap = 'round';
+        cx.beginPath();
+        cx.moveTo(f.x - 9, y);
+        cx.lineTo(f.x - 2, y + 7);
+        cx.lineTo(f.x + 10, y - 7);
+        cx.stroke();
+        cx.lineCap = 'butt';
+        art.rounded(cx, f.x + 24, y - 14, 74, 28, 10, '#dff0ff', '#2f6fb0', 2);
+        art.textAt(cx, `${(timing.answer / 30).toFixed(1)} s`, f.x + 61, y + 6, 17, '#1f4f85', 1000);
+        cx.globalAlpha = 1;
+      } else if (f.type === 'cancelled' && f.x !== undefined && f.y !== undefined) {
+        cx.globalAlpha = 1 - t;
+        art.oval(cx, f.x, f.y - t * 20, 16 + t * 10, 16 + t * 10, '#5a5062');
+        art.textAt(cx, '×', f.x, f.y + 8 - t * 20, 26, '#fff', 1000);
         cx.globalAlpha = 1;
       }
-      if (table.state === 'wiping' && action && action.phase === 'working') {
-        art.bar(cx, m.x - 60, area.y + 4, 120, 16, 1 - action.ticksLeft / timing.wipe, '#8fd3ff');
-      }
     }
 
-    // ---- Guests, back to front.
-    let standingIndex = 0;
-    const order = [...state.guests].sort((a, b) => guestPosition(state, a, 0).y - guestPosition(state, b, 0).y);
-    for (const g of order) {
-      const spec = state.schedule.find((s) => s.id === g.id);
-      if (!spec) continue;
-      const pos = guestPosition(state, g, g.place.kind === 'standing' ? standingIndex++ : 0);
-      const patienceMax = g.state === 'asking' ? timing.askingPatience : timing.counterPatience;
-      const fraction = g.patienceLeft / patienceMax;
-      const waiting = g.state === 'waiting' || g.state === 'walkingIn' || g.state === 'asking';
-      const pleased = (view.happyUntil.get(g.id) ?? 0) > view.now;
-      art.guest(cx, pos.x, pos.y, spec.look, pos.scale, pleased ? 'happy' : waiting && fraction < 0.25 ? 'worried' : 'neutral');
-      const isSelected = service.selected() === g.id;
-      if (isSelected) {
-        cx.strokeStyle = '#ff8d20';
-        cx.lineWidth = 6;
-        cx.beginPath();
-        cx.ellipse(pos.x, pos.y + 39 * pos.scale, 34 * pos.scale, 11 * pos.scale, 0, 0, Math.PI * 2);
-        cx.stroke();
-      }
-
-      if (g.dishId !== null && !waiting) {
-        // Served: their order sits in front of them.
-        const ix = g.place.kind === 'table' ? pos.x + 46 : pos.x + 30;
-        const iy = g.place.kind === 'table' ? pos.y + 6 : pos.y + 22;
-        orderIcon(spec, ix, iy, 26);
-      }
-      if (!waiting) continue;
-
-      // What they want, and a patience bar under it. An order is a cream
-      // ticket with the item on it; a question is a blue speech bubble with
-      // a phone, so the two can never be mistaken for each other.
-      const big = g.place.kind === 'spot';
-      const asking = g.state === 'asking';
-      const bw = big ? (asking ? 104 : 84) : 56;
-      const bh = big ? 58 : 40;
-      const bx = pos.x - bw / 2;
-      const by = pos.y - 60 * pos.scale - bh + (big ? 46 : 30);
-      const attended = g.attendedBy !== null;
-      if (asking && spec.question) {
-        // The spot they are holding is marked on the floor.
-        cx.setLineDash([10, 8]);
-        cx.strokeStyle = '#2f6fb0';
-        cx.lineWidth = 5;
-        cx.beginPath();
-        cx.ellipse(pos.x, pos.y + 39 * pos.scale, 40 * pos.scale, 13 * pos.scale, 0, 0, Math.PI * 2);
-        cx.stroke();
-        cx.setLineDash([]);
-        art.rounded(cx, bx, by, bw, bh, 22, '#dff0ff', attended ? '#ff8d20' : '#2f6fb0', attended ? 6 : 4);
-        art.poly(cx, [[pos.x - 10, by + bh - 2], [pos.x + 10, by + bh - 2], [pos.x, by + bh + 12]], '#dff0ff');
-        art.phone(cx, bx + bw * 0.2, by + bh * 0.5, bh * 0.72);
-        art.textAt(cx, '?', bx + bw * 0.47, by + bh * 0.74, bh * 0.72, '#2f6fb0', 1000);
-        art.topicIcon(cx, spec.question.topic, bx + bw * 0.76, by + bh * 0.5, bh * 0.56);
-      } else {
-        art.rounded(cx, bx, by, bw, bh, 8, '#fff9e9', attended || isSelected ? '#ff8d20' : '#6d4b42', attended || isSelected ? 6 : 3);
-        orderIcon(spec, bx + bw / 2 + (big ? 8 : 0), by + bh / 2 + 2, bh * 0.56);
-      }
-      art.tag(cx, bx + (big ? 4 : 2), by + 4, big ? 17 : 13, g.id, asking ? '#2f6fb0' : '#30303a');
-      const color = fraction < 0.25 ? '#df6254' : fraction < 0.5 ? '#e7b84a' : asking ? '#6fb3ee' : '#a8d46f';
-      art.bar(cx, bx, by + bh + (asking ? 14 : 3), bw, big ? 14 : 10, fraction, color);
-    }
-
-    // ---- Owner.
-    const from = PLACES.owner[state.owner.zone] ?? PLACES.owner.counter;
-    let ox = from.x;
-    let oy = from.y;
-    if (action) {
-      let to = PLACES.owner[action.zone] ?? from;
-      if (action.kind === 'wipe' && action.claims.tableId !== null) {
-        const tableId = action.claims.tableId;
-        const area = HIT_AREAS.find((a) => a.target.kind === 'table' && a.target.tableId === tableId);
-        if (area) to = { x: area.x + area.w - 34, y: area.y + 58 };
-      }
-      if (action.phase === 'travelling') {
-        const t = 1 - action.ticksLeft / timing.travel;
-        ox = lerp(from.x, to.x, t);
-        oy = lerp(from.y, to.y, t);
-      } else {
-        ox = to.x;
-        oy = to.y;
-      }
-    }
-    art.owner(cx, ox, oy, 1.25);
-    if (action && action.phase === 'working') {
-      const total = action.kind === 'wash' ? timing.washPerDish : timing[action.kind];
-      // Answering a question is drawn in the questions' blue, not the orange of café work.
-      art.bar(cx, ox - 46, oy - 158, 92, 16, 1 - action.ticksLeft / total, action.kind === 'answer' ? '#6fb3ee' : '#ffb03a');
-      if (action.kind === 'answer') art.phone(cx, ox + 62, oy - 150, 30);
-    }
-
-    // ---- Byte.
-    art.byte(cx, PLACES.byte.x, PLACES.byte.y, 0.7, view.byteMood);
-
-    // ---- Target outlines: what can be done now, what is queued, and feedback.
+    // ---- What can be pressed now, what is queued, and press feedback.
     /** @type {Map<string, string>} */
     const badges = new Map();
     /** @param {{ kind: string, guestId: number | null, tableId: number | null }} a @param {string} label */
@@ -402,10 +316,8 @@ export function createRenderer(canvas) {
     if (action) badgeFor({ kind: action.kind, guestId: action.claims.guestId, tableId: action.claims.tableId }, '•');
     state.owner.queue.forEach((q, i) => badgeFor(q, String(i + 1)));
 
-    const playing = state.phase !== 'ended';
     for (const area of HIT_AREAS) {
       const t = area.target;
-      // What pressing here would do next, if anything.
       /** @type {'none' | 'do' | 'pick' | 'drop'} */
       let cue = 'none';
       if (playing && (t.kind === 'machine' || t.kind === 'case')) {
@@ -420,45 +332,415 @@ export function createRenderer(canvas) {
       const flashing = flash && flash.until > view.now ? flash.kind : null;
       const hover = view.hoverId === area.id;
       if (flashing === 'reject') {
-        art.rounded(cx, area.x, area.y, area.w, area.h, 18, '#d9534f22', '#d9534f', 6);
+        // A refused press shakes the outline, briefly.
+        const shake = flash ? Math.sin((flash.until - view.now) / 18) * 4 * motion : 0;
+        art.rounded(cx, area.x + shake, area.y, area.w, area.h, 18, '#d9534f22', '#d9534f', 6);
       } else if (flashing === 'press') {
         art.rounded(cx, area.x, area.y, area.w, area.h, 18, '#ffffff40', '#ff8d20', 6);
       } else if (cue === 'drop' || cue === 'pick') {
-        art.rounded(cx, area.x + 3, area.y + 3, area.w - 6, area.h - 6, 18, hover ? '#7fd36a40' : '#7fd36a22', '#3f9b3a', 6);
+        const breathe = 0.5 + 0.5 * Math.sin(time * 5) * motion;
+        art.rounded(cx, area.x + 3, area.y + 3, area.w - 6, area.h - 6, 18, hover ? '#7fd36a40' : `rgba(127, 211, 106, ${(0.1 + breathe * 0.12).toFixed(3)})`, '#3f9b3a', 6);
       } else if (cue === 'do') {
         cx.setLineDash(hover ? [] : [14, 10]);
+        cx.lineDashOffset = -time * 20 * motion;
         art.rounded(cx, area.x + 3, area.y + 3, area.w - 6, area.h - 6, 18, hover ? '#ffffff26' : '#ffffff00', '#ff8d20', hover ? 5 : 4);
         cx.setLineDash([]);
+        cx.lineDashOffset = 0;
       } else if (hover) {
         art.rounded(cx, area.x + 3, area.y + 3, area.w - 6, area.h - 6, 18, '#ffffff00', '#6d4b4288', 3);
       }
       const badge = badges.get(area.id);
       if (badge) {
-        art.oval(cx, area.x + area.w - 18, area.y + area.h - 18, 17, 17, badge === '•' ? '#ff8d20' : '#30303a');
-        art.textAt(cx, badge, area.x + area.w - 18, area.y + area.h - 9, 24, '#fff', 1000);
+        if (badge === '•') {
+          // The owner's current job: a small labelled tag, not a bare dot.
+          art.rounded(cx, area.x + area.w - 58, area.y + area.h - 30, 54, 24, 12, '#ff8d20', '#fff', 2);
+          art.textAt(cx, 'NOW', area.x + area.w - 31, area.y + area.h - 12, 15, '#fff', 1000);
+        } else {
+          art.oval(cx, area.x + area.w - 18, area.y + area.h - 18, 17, 17, '#30303a');
+          art.textAt(cx, badge, area.x + area.w - 18, area.y + area.h - 9, 24, '#fff', 1000);
+        }
       }
     }
 
-    // ---- An item being dragged follows the pointer.
+    // ---- An item being dragged follows the pointer, held up slightly.
     if (view.drag) {
-      art.oval(cx, view.drag.x, view.drag.y + 26, 30, 9, '#00000030');
-      if (view.drag.item === 'latte') art.cup(cx, view.drag.x - 4, view.drag.y, 52, true);
-      else {
-        art.plate(cx, view.drag.x, view.drag.y + 8, 76, false);
-        art.croissant(cx, view.drag.x, view.drag.y, 50);
+      const d = view.drag;
+      art.oval(cx, d.x, d.y + 34, 30, 8, '#00000038');
+      if (d.item === 'latte') {
+        cupWithFill(cx, d.x - 4, d.y, 52, 1, true);
+        steam(cx, d.x - 4, d.y - 24, time * motion, 1);
+      } else {
+        art.plate(cx, d.x, d.y + 8, 76, false);
+        art.croissant(cx, d.x, d.y, 50);
+      }
+    }
+  }
+
+  /**
+   * @param {SimState} state
+   * @param {import('./clips.js').OwnerClip} clip
+   * @param {Animator} anim
+   * @param {number} time Seconds.
+   * @param {number} motion 0 under reduced motion.
+   * @returns {Pose}
+   */
+  function buildOwnerPose(state, clip, anim, time, motion) {
+    const O = anim.owner;
+    const s = OWNER.height ?? 1;
+    /** World point to the owner's local, unscaled frame. */
+    const local = (/** @type {number} */ wx, /** @type {number} */ wy) => ({ x: (wx - O.x) / s, y: (wy - O.y) / s });
+    const blink = (time * 1000) % 4100 < 120 ? 'closed' : 'open';
+    /** @type {Face} */
+    const face = { eyes: blink, mouth: 'smile', lookX: O.facing * 0.6 };
+    /** @type {Pose} */
+    const pose = {
+      stride: O.stride,
+      walk: O.walk,
+      facing: O.facing,
+      bob: Math.sin(time * 2) * 0.8 * motion,
+      hideLegs: O.y < STAGE.behindY + 30,
+      face,
+    };
+    const p = clip.progress;
+    const item = clip.item;
+    switch (clip.kind) {
+      case 'walk': {
+        if (item === 'cloth') {
+          pose.rightHand = { x: -20, y: -78 };
+          pose.holdRight = (c, x, y) => cloth(c, x, y);
+        } else if (item) {
+          const carried = /** @type {OrderItem | 'cup'} */ (item);
+          pose.rightHand = { x: 6 + O.facing * 10, y: -90 };
+          pose.holdRight = (c, x, y) => heldItem(c, carried, x, y - 4, 26);
+          face.mouth = 'smile';
+        }
+        break;
+      }
+      case 'brew': {
+        const cupAt = PROPS.machine.cup;
+        if (p < 0.6) {
+          // Carry a clean cup to the spout.
+          const k = smooth(p / 0.6);
+          const from = { x: O.x - 10, y: O.y - 92 };
+          const to = { x: cupAt.x + 6, y: cupAt.y - 2 };
+          const hand = local(from.x + (to.x - from.x) * k, from.y + (to.y - from.y) * k);
+          pose.rightHand = hand;
+          pose.holdRight = (c, x, y) => cupWithFill(c, x - 6, y - 8, 40, 0, false);
+        } else {
+          // The cup sits under the spout; press the brew button.
+          cupWithFill(cx, cupAt.x, cupAt.y, 40, 0, false);
+          const press = Math.sin(((p - 0.6) / 0.4) * Math.PI);
+          pose.rightHand = local(PROPS.machine.x + PROPS.machine.w - 10 + press * 4, PROPS.machine.y + 40);
+          pose.leftHand = { x: 22, y: -80 };
+        }
+        face.lookX = -1;
+        face.lookY = -0.4;
+        break;
+      }
+      case 'plate': {
+        const into = { x: PROPS.caseBox.x + 110, y: PROPS.caseBox.y + 44 };
+        const pass = { x: PROPS.pass.x + 4, y: PROPS.pass.y - 6 };
+        const k = p < 0.45 ? smooth(p / 0.45) : smooth((p - 0.45) / 0.55);
+        const from = p < 0.45 ? { x: O.x - 14, y: O.y - 92 } : into;
+        const to = p < 0.45 ? into : pass;
+        pose.rightHand = local(from.x + (to.x - from.x) * k, from.y + (to.y - from.y) * k);
+        if (p >= 0.45) pose.holdRight = (c, x, y) => heldItem(c, 'croissant', x, y, 24);
+        face.lookX = -1;
+        break;
+      }
+      case 'serve': {
+        // Lean over the counter and hold the item out to the guest.
+        const k = smooth(p);
+        pose.rightHand = { x: 4, y: -96 + k * 16 };
+        pose.leftHand = { x: 14, y: -90 + k * 10 };
+        pose.lean = 0;
+        if (item === 'latte' || item === 'croissant') pose.holdRight = (c, x, y) => heldItem(c, item, x, y - 6, 28);
+        face.mouth = 'grin';
+        face.lookY = 0.6;
+        break;
+      }
+      case 'answer': {
+        // Talking it through: an open hand, and a moving mouth.
+        const wave = Math.sin(time * 7) * motion;
+        pose.rightHand = { x: -26 + wave * 5, y: -124 + wave * 3 };
+        face.mouth = Math.floor(time * 8 * motion) % 2 === 0 ? 'talk' : 'neutral';
+        face.lookY = 0.5;
+        break;
+      }
+      case 'wash': {
+        const basin = PROPS.sink.basin;
+        const a = p * Math.PI * 2 * 4;
+        const hx = basin.x - 26 + Math.sin(a) * 9 * (motion || 0.4);
+        const hy = basin.y + 2 + Math.cos(a) * 3;
+        pose.leftHand = local(hx + 10, hy);
+        pose.rightHand = local(hx - 8, hy + 2);
+        pose.holdLeft = (c, x, y) => dishInHand(c, x - 6, y, p);
+        face.lookX = 1;
+        face.lookY = 0.6;
+        break;
+      }
+      case 'wipe': {
+        const at = clothAt(clip.tableId ?? 1, p);
+        pose.rightHand = local(at.x, at.y);
+        pose.holdRight = (c, x, y) => cloth(c, x, y);
+        pose.leftHand = { x: 16, y: -86 };
+        face.lookX = -1;
+        face.lookY = 0.7;
+        break;
+      }
+      default: {
+        // Idle: glance towards whoever is waiting longest.
+        const waiting = state.guests.filter((g) => g.place.kind === 'spot' && g.state === 'waiting');
+        if (waiting.length > 0) {
+          const g = waiting.reduce((a, b) => (a.patienceLeft < b.patienceLeft ? a : b));
+          const body = anim.guests.get(g.id);
+          if (body) face.lookX = Math.max(-1, Math.min(1, (body.x - O.x) / 200));
+          face.lookY = 0.6;
+        }
+      }
+    }
+    return pose;
+  }
+
+  /**
+   * @param {SimState} state
+   * @param {ViewState} view
+   * @param {number} tableId
+   * @param {number} time
+   * @param {number} motion
+   */
+  function drawTableGroup(state, view, tableId, time, motion) {
+    const anim = view.anim;
+    const c = tableCentre(tableId);
+    const seat = seatOf(tableId);
+    chair(cx, c.x + 58, c.y - 2, 'back');
+    chair(cx, seat.x, seat.y - 16, 'back');
+    chair(cx, seat.x, seat.y - 16, 'seat');
+    const seated = state.guests.find((g) => g.state === 'seated' && g.place.kind === 'table' && g.place.tableId === tableId);
+    const body = seated ? anim.guests.get(seated.id) : undefined;
+    if (seated && body) {
+      const spec = state.schedule.find((s) => s.id === seated.id);
+      const phase = seated.id * 1.7;
+      const sip = spec?.order === 'latte' && Math.sin(time * 0.9 + phase) > 0.9 && motion > 0;
+      person(cx, body.x, body.y - 16, GUEST_SCALE, CAST[body.look % CAST.length], {
+        seated: true,
+        facing: 1,
+        bob: Math.sin(time * 1.6 + phase) * 0.6 * motion,
+        face: { eyes: (time * 1000 + phase * 900) % 3900 < 120 ? 'closed' : sip ? 'happy' : 'open', mouth: 'smile', blush: anim.joy(seated.id) > 0, lookX: 0.6 },
+        rightHand: sip ? { x: -6, y: -128 } : { x: 30, y: -76 },
+        leftHand: { x: 40, y: -80 },
+        holdRight: sip ? (cc, x, y) => cupWithFill(cc, x, y - 4, 22, 0.8, false) : null,
+      });
+    }
+    const wiped = anim.progressOf('tableWiped', (f) => f.tableId === tableId);
+    drawTableTop(cx, { x: c.x, y: c.y - 4, dirt: tableDirt(state, tableId), shine: wiped < 0 ? 0 : wiped });
+    if (seated && seated.dishId !== null) {
+      const spec = state.schedule.find((s) => s.id === seated.id);
+      const sipping = spec?.order === 'latte' && Math.sin(time * 0.9 + seated.id * 1.7) > 0.9 && motion > 0;
+      if (spec?.order === 'croissant') {
+        art.plate(cx, c.x - 14, c.y - 6, 48, false);
+        art.croissant(cx, c.x - 14, c.y - 12, 28);
+      } else if (!sipping) {
+        cupWithFill(cx, c.x - 14, c.y - 10, 26, 0.8, true);
+      }
+    }
+  }
+
+  /**
+   * @param {SimState} state
+   * @param {ViewState} view
+   * @param {LiveGuest} g
+   * @param {import('./animator.js').GuestBody} body
+   * @param {number} time
+   * @param {number} motion
+   */
+  function drawGuest(state, view, g, body, time, motion) {
+    const anim = view.anim;
+    const clip = guestClip(state, g);
+    const look = CAST[body.look % CAST.length];
+    const phase = g.id * 1.7;
+    const joy = anim.joy(g.id);
+    const blink = (time * 1000 + phase * 1000) % 3700 < 120;
+    const scale = g.place.kind === 'door' ? QUEUE_SCALE : GUEST_SCALE;
+    /** @type {Face} */
+    const face = { eyes: blink ? 'closed' : 'open', mouth: 'smile', lookX: 0, lookY: 0 };
+    /** @type {Pose} */
+    const pose = { stride: body.stride, walk: body.walk, facing: body.facing, face, bob: 0 };
+    const idle = motion * (body.walk < 0.2 ? 1 : 0);
+    pose.bob = Math.sin(time * 2.2 + phase) * 0.8 * idle;
+    const item = /** @type {OrderItem} */ (body.order);
+
+    if (clip.mood === 'impatient') {
+      pose.crossedArms = true;
+      pose.footTap = Math.max(0, Math.sin(time * 9 + phase)) * idle;
+      face.brows = 'cross';
+      face.mouth = 'neutral';
+    } else if (clip.mood === 'anxious') {
+      face.eyes = blink ? 'closed' : 'worried';
+      face.mouth = 'frown';
+      face.sweat = true;
+      pose.lean = Math.sin(time * 16 + phase) * 0.025 * idle;
+      pose.rightHand = { x: -26, y: -70 };
+    } else if (clip.kind === 'wait' || clip.kind === 'door') {
+      // Glance up at the menu board now and then.
+      if (Math.sin(time * 0.45 + phase) > 0.75) {
+        face.lookY = -1;
+        face.lookX = -0.6;
+      } else {
+        face.lookY = 0.2;
       }
     }
 
-    // ---- Short rising labels: a payment, a tip, a guest lost.
-    for (const fx of view.effects) {
-      if (fx.until <= view.now) continue;
-      const t = (view.now - fx.start) / (fx.until - fx.start);
-      cx.globalAlpha = 1 - Math.max(0, t - 0.6) / 0.4;
-      const y = fx.y - 40 * t;
-      const w = 28 + fx.text.length * 17;
-      art.rounded(cx, fx.x - w / 2, y - 26, w, 36, 12, '#29282cee');
-      art.textAt(cx, fx.text, fx.x, y, 26, fx.color, 1000);
-      cx.globalAlpha = 1;
+    if (clip.kind === 'ask') {
+      // Holding up a phone with a question on it.
+      const buzz = (time * 1.1 + phase) % 2.2 < 0.25 ? Math.sin(time * 70) * 1.5 * motion : 0;
+      pose.crossedArms = false;
+      pose.rightHand = { x: -24 + buzz, y: -126 };
+      // Only a question about the café online comes with a phone in hand.
+      const asked = state.schedule.find((s) => s.id === g.id)?.question;
+      if (asked?.supported) pose.holdRight = (c, x, y) => art.phone(c, x, y - 8, 26);
+      else pose.rightHand = { x: -18, y: -118 };
+      face.lookX = 0.4;
+      face.lookY = -0.4;
+    }
+    if (clip.attended && clip.kind === 'wait') {
+      // Being served: hands ready to take it.
+      pose.crossedArms = false;
+      pose.footTap = 0;
+      pose.rightHand = { x: -10, y: -88 };
+      pose.leftHand = { x: 10, y: -88 };
+      face.mouth = 'o';
+      face.eyes = 'open';
+      face.lookY = -0.6;
+      face.sweat = false;
+    }
+    if (joy > 0 || ((clip.kind === 'toTable' || clip.kind === 'standing' || clip.kind === 'ask') && body.item)) {
+      if (clip.kind !== 'ask') {
+        pose.crossedArms = false;
+        pose.rightHand = { x: -6, y: -86 };
+        pose.leftHand = { x: 12, y: -84 };
+        pose.holdRight = (c, x, y) => heldItem(c, item, x + 4, y - 4, 22);
+      }
+    }
+    if (joy > 0) {
+      face.eyes = 'happy';
+      face.mouth = 'grin';
+      face.blush = true;
+      face.sweat = false;
+      pose.bob = -Math.abs(Math.sin((1 - joy) * Math.PI * 2)) * 7 * motion;
+    } else if (clip.kind === 'standing') {
+      face.mouth = 'neutral';
+      face.eyes = blink ? 'closed' : 'down';
+    }
+    person(cx, body.x, body.y, scale, look, pose);
+  }
+
+  /**
+   * @param {import('./animator.js').Ghost} ghost
+   * @param {{ x: number, y: number }} at
+   * @param {number} time
+   * @param {number} motion
+   * @param {Animator} anim
+   */
+  function drawGhost(ghost, at, time, motion, anim) {
+    const look = CAST[ghost.look % CAST.length];
+    const t = Math.min(1, (anim.now() - ghost.start) / ghost.duration);
+    const fade = t > 0.85 ? 1 - (t - 0.85) / 0.15 : 1;
+    const unhappy = ghost.mood !== 'happy';
+    const facing = ghost.path[ghost.path.length - 1].x < ghost.path[0].x ? -1 : 1;
+    cx.globalAlpha = fade;
+    person(cx, at.x, at.y, GUEST_SCALE, look, {
+      stride: ghost.stride + t * ghost.duration * 0.02,
+      walk: 1,
+      facing,
+      face: unhappy ? { eyes: 'down', mouth: 'frown', brows: 'worried' } : { eyes: 'happy', mouth: 'smile', blush: true },
+      lean: unhappy ? -0.06 : 0,
+      rightHand: unhappy ? null : { x: -30, y: -138 + Math.sin(time * 12) * 4 * motion },
+    });
+    if (unhappy) {
+      // A small storm cloud follows a guest who gave up.
+      const y = at.y - 190;
+      for (const [dx, r] of [[-16, 12], [0, 16], [16, 12]]) art.oval(cx, at.x + dx, y, r, r * 0.8, '#6c6f7a');
+      cx.strokeStyle = '#9fc4e6';
+      cx.lineWidth = 2;
+      for (const dx of [-10, 2, 14]) {
+        const k = (time * 3 + dx) % 1;
+        cx.beginPath();
+        cx.moveTo(at.x + dx, y + 12 + k * 10);
+        cx.lineTo(at.x + dx - 3, y + 18 + k * 10);
+        cx.stroke();
+      }
+    }
+    cx.globalAlpha = 1;
+  }
+
+  /**
+   * The order ticket or question bubble over a guest.
+   * @param {SimState} state
+   * @param {ViewState} view
+   * @param {LiveGuest} g
+   * @param {import('./animator.js').GuestBody} body
+   * @param {number} time
+   * @param {number} motion
+   */
+  function drawBubble(state, view, g, body, time, motion) {
+    const anim = view.anim;
+    const spec = state.schedule.find((s) => s.id === g.id);
+    if (!spec) return;
+    const clip = guestClip(state, g);
+    const service = view.service;
+    const big = g.place.kind === 'spot';
+    const asking = g.state === 'asking';
+    const timing = state.timing;
+    const fraction = g.patienceLeft / (asking ? timing.askingPatience : timing.counterPatience);
+    const scale = big ? GUEST_SCALE : QUEUE_SCALE;
+    const headTop = body.y - 168 * scale;
+    const bw = big ? (asking ? 108 : 86) : 58;
+    const bh = big ? 56 : 40;
+    // Pop in when a question is asked; shake when patience is nearly gone.
+    const pop = asking ? anim.progressOf('askPop', (f) => f.guestId === g.id) : -1;
+    const grow = pop < 0 ? 1 : 0.6 + 0.4 * smooth(pop) + Math.sin(pop * Math.PI) * 0.12;
+    const shake = clip.mood === 'anxious' && g.attendedBy === null ? Math.sin(time * 40) * 2 * motion : 0;
+    const bx = body.x - bw / 2 + shake;
+    const by = headTop - bh - 18;
+    cx.save();
+    cx.translate(body.x, by + bh);
+    cx.scale(grow, grow);
+    cx.translate(-body.x, -(by + bh));
+    const attended = g.attendedBy !== null;
+    const selected = service.selected() === g.id;
+    if (asking && spec.question) {
+      art.rounded(cx, bx, by, bw, bh, 22, '#dff0ff', attended ? '#ff8d20' : '#2f6fb0', attended ? 6 : 4);
+      art.poly(cx, [[body.x - 8, by + bh - 2], [body.x + 8, by + bh - 2], [body.x + 2, by + bh + 12]], '#dff0ff');
+      // A digital-presence question shows a phone; the washroom does not.
+      if (spec.question.supported) art.phone(cx, bx + bw * 0.2, by + bh * 0.5, bh * 0.72);
+      art.textAt(cx, '?', bx + bw * (spec.question.supported ? 0.47 : 0.3), by + bh * 0.74, bh * 0.72, '#2f6fb0', 1000);
+      art.topicIcon(cx, spec.question.topic, bx + bw * 0.77, by + bh * 0.5, bh * 0.56);
+      // The counter spot they are holding.
+      cx.setLineDash([10, 8]);
+      cx.strokeStyle = '#2f6fb0';
+      cx.lineWidth = 4;
+      cx.beginPath();
+      cx.ellipse(body.x, body.y + 2, 40, 12, 0, 0, Math.PI * 2);
+      cx.stroke();
+      cx.setLineDash([]);
+    } else {
+      art.rounded(cx, bx, by, bw, bh, 8, '#fff9e9', attended || selected ? '#ff8d20' : '#6d4b42', attended || selected ? 6 : 3);
+      art.poly(cx, [[body.x - 8, by + bh - 2], [body.x + 8, by + bh - 2], [body.x, by + bh + 10]], '#fff9e9');
+      if (spec.order === 'latte') cupWithFill(cx, bx + bw / 2 + (big ? 8 : 0), by + bh / 2 + 4, bh * 0.56, 1, true);
+      else art.croissant(cx, bx + bw / 2 + (big ? 8 : 0), by + bh / 2 + 2, bh * 0.56);
+    }
+    art.tag(cx, bx + (big ? 4 : 2), by + 4, big ? 17 : 13, g.id, asking ? '#2f6fb0' : '#30303a');
+    const color = fraction < 0.25 ? '#df6254' : fraction < 0.5 ? '#e7b84a' : asking ? '#6fb3ee' : '#7fbf5a';
+    art.bar(cx, bx, by + bh + (asking ? 14 : 12), bw, big ? 12 : 9, fraction, color);
+    cx.restore();
+    if (selected) {
+      // The picked order: a ring on the floor under the guest.
+      cx.strokeStyle = '#ff8d20';
+      cx.lineWidth = 5;
+      cx.beginPath();
+      cx.ellipse(body.x, body.y + 2, 36, 11, 0, 0, Math.PI * 2);
+      cx.stroke();
     }
   }
 

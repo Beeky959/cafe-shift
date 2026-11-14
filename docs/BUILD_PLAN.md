@@ -31,6 +31,7 @@ This is the smallest thing that can answer all four questions in the brief: is i
 - **Status:** built on a separate branch, awaiting playtest. See `docs/M2_5_EXPERIMENT.md`. M3 waits for its result.
 
 ### M3 — Animation for the core tasks
+- **Status:** built on branch `m3-animated-cafe`, awaiting gameplay approval. See `docs/M3_RESULTS.md`.
 - **Build:** clip selection, tweens, effects; brewing, serving, wiping, washing, customer reactions, Byte expressions.
 - **Depends on:** M2.
 - **Gate:** clip-selection tests pass for every state; no completion effect without a completion event in a replayed log; cancel, overlap and repeat cases from TECH_BLUEPRINT.md §5 demonstrated; frame budget met on the test phone.

@@ -56,16 +56,17 @@ export function drive(state) {
     events.push(...produced);
     return produced;
   }
-  return {
+  const api = {
     state,
     events,
+    /** One tick. Tests may wrap this to observe every tick; the helpers below go through it. */
     tick,
     /** @param {Target} target */
-    tap: (target) => tick([{ type: 'tap', target }]),
+    tap: (/** @type {Target} */ target) => api.tick([{ type: 'tap', target }]),
     /** Steps until `state.tick` equals `target`. @param {number} target */
     to(target) {
       assert.ok(target >= state.tick, `cannot go back to tick ${target}`);
-      while (state.tick < target && state.phase !== 'ended') tick();
+      while (state.tick < target && state.phase !== 'ended') api.tick();
     },
     /**
      * Steps until an event of this type happens, and returns it.
@@ -75,7 +76,7 @@ export function drive(state) {
      */
     until(type, match = () => true) {
       for (let i = 0; i < 6000; i++) {
-        const hit = tick().find((e) => e.type === type && match(e));
+        const hit = api.tick().find((e) => e.type === type && match(e));
         if (hit) return hit;
         if (state.phase === 'ended') break;
       }
@@ -84,4 +85,5 @@ export function drive(state) {
     /** @param {string} type */
     all: (type) => events.filter((e) => e.type === type),
   };
+  return api;
 }

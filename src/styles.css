@@ -164,9 +164,14 @@ button:focus-visible { outline: 4px solid #72a6ff; outline-offset: 2px; }
 .card-title { max-width: 100%; font-size: 10.5px; font-weight: 900; white-space: nowrap; }
 .card-status { max-width: 100%; font-size: 9px; font-weight: 800; color: #7a6a58; white-space: nowrap; }
 .card-bar { align-self: stretch; height: 6px; margin: 0 2px; border-radius: 3px; background: #3a2c2c33; overflow: hidden; }
-.card-bar i { display: block; height: 100%; width: 100%; border-radius: 3px; background: #7fbf5a; }
+.card-bar i { display: block; height: 100%; width: 100%; border-radius: 3px; background: #7fbf5a; transition: width 0.25s linear, background-color 0.3s; }
 .card[data-urgent='yes'] .card-bar i { background: #df6254; }
-.card[data-urgent='yes'] { border-color: #df6254; }
+.card[data-urgent='yes'] { border-color: #df6254; animation: urgent 0.9s ease-in-out infinite; }
+@keyframes urgent { 50% { box-shadow: 0 0 0 3px #df625466; } }
+
+/* A new ticket slides up onto the rail. */
+.card.enter { animation: card-in 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.2); }
+@keyframes card-in { from { transform: translateY(14px) scale(0.92); opacity: 0; } }
 
 .card[data-selected='yes'] { border-color: var(--orange); box-shadow: 0 0 0 2px var(--orange); background: #fff1d9; }
 .card[data-status='ready'] .card-status { color: #2f7d2a; }
@@ -186,19 +191,29 @@ button:focus-visible { outline: 4px solid #72a6ff; outline-offset: 2px; }
    never hides a question that follows straight after. */
 .card-receipt {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 17px;
+  left: 4px;
+  right: 4px;
+  bottom: 2px;
+  height: 18px;
   display: none;
   align-items: center;
   justify-content: center;
-  background: #2f7d2a;
-  color: #fff;
+  border: 2px solid #2f7d2a;
+  border-radius: 4px;
+  background: #e9f7e0;
+  color: #2f7d2a;
   font-size: 10px;
-  font-weight: 900;
+  font-weight: 1000;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
   white-space: nowrap;
+  transform: rotate(-4deg);
 }
+
+/* The PAID stamp lands with a thump. */
+.card[data-receipt='yes'] .card-receipt { animation: stamp 0.3s cubic-bezier(0.3, 1.6, 0.5, 1); }
+@keyframes stamp { from { transform: rotate(-4deg) scale(1.8); opacity: 0; } }
+.card[data-kind='empty'][data-receipt='yes'] .card-receipt { border-color: #b4483d; background: #fbe4e1; color: #b4483d; }
 
 .card[data-kind='empty'] .card-receipt { top: 0; height: auto; }
 
@@ -216,6 +231,11 @@ button:focus-visible { outline: 4px solid #72a6ff; outline-offset: 2px; }
 
 .stat strong.bump { animation: bump 0.4s ease-out; }
 @keyframes bump { 30% { transform: scale(1.35); color: #2f7d2a; } }
+.stat strong.shake { animation: shake 0.4s ease-out; color: #b4483d; }
+@keyframes shake { 20%, 60% { transform: translateX(-3px); } 40%, 80% { transform: translateX(3px); } }
+.stat.questions strong.bump { animation-name: bump-blue; }
+@keyframes bump-blue { 30% { transform: scale(1.35); color: #1f4f85; } }
+#hud-time[data-warn='yes'] { color: #b4483d; }
 
 /* ---- Action strip */
 .strip {
@@ -241,7 +261,12 @@ button:focus-visible { outline: 4px solid #72a6ff; outline-offset: 2px; }
   overflow: hidden;
 }
 
-.chip:first-child { border-color: var(--orange); }
+/* The current action fills from the left as the work is done. */
+.chip:first-child {
+  border-color: var(--orange);
+  background: linear-gradient(90deg, #ffd9a8 var(--p, 0%), #fff1d9 var(--p, 0%));
+}
+.chip:first-child:disabled { background: #3a3440; }
 .chip:disabled { background: #3a3440; color: #9a8fa0; border-color: #4a424f; }
 
 /* ---- Byte's caption */
@@ -264,6 +289,9 @@ button:focus-visible { outline: 4px solid #72a6ff; outline-offset: 2px; }
 .caption[data-mood='sad'] { background: #2f3644; }
 .caption[data-mood='happy'] { background: #2c3d2a; }
 .caption[data-mood='notice'] { background: #3a2f3f; }
+.caption[data-mood='thinking'] { background: #2f3540; }
+.caption[data-mood='celebrate'] { background: #3a4a24; }
+.caption[data-mood='celebrate'] .byte-name { color: #ffd45a; }
 .caption[data-mood='alert'] .byte-name { color: #ffb03a; }
 .caption[data-mood='sad'] .byte-name { color: #8fb6d6; }
 
@@ -374,5 +402,6 @@ kbd {
 
 @media (prefers-reduced-motion: reduce) {
   .mainbtn:active { transform: none; }
-  .stat strong.bump { animation: none; }
+  .stat strong.bump, .stat strong.shake, .card.enter, .card[data-urgent='yes'], .card[data-receipt='yes'] .card-receipt { animation: none; }
+  .card-bar i { transition: none; }
 }

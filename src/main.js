@@ -37,7 +37,8 @@ function start() {
     onPause: () => game.togglePause(),
     onOverlayButton: () => game.overlayButton(),
   });
-  game = createGame({ seed: options.seed, ui, draw: renderer.draw });
+  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+  game = createGame({ seed: options.seed, ui, draw: renderer.draw, reducedMotion });
 
   renderer.resize();
   new ResizeObserver(() => renderer.resize()).observe(canvas);

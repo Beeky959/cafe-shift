@@ -1,8 +1,8 @@
 {
   "name": "byte-builds-cafe-shift",
-  "version": "0.5.5-exp",
+  "version": "0.6.0-m3",
   "private": true,
-  "description": "Byte Builds: Café Shift. Browser café-management game. M2.5 gameplay experiment: order service by hand.",
+  "description": "Byte Builds: Café Shift. Browser café-management game. Milestone M3: animated café.",
   "type": "module",
   "engines": {
     "node": ">=22"

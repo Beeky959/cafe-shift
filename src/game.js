@@ -12,7 +12,7 @@ import { TICKS_PER_SECOND, createInitialState, digest, resolveTap, step } from '
 import { createByte } from './ui/byte.js';
 import { rejectionText } from './ui/labels.js';
 import { createService } from './ui/service.js';
-import { HIT_AREAS, centreOf } from './view/scene.js';
+import { createAnimator } from './view/animator.js';
 
 const TICK_MS = 1000 / TICKS_PER_SECOND;
 /** Never try to catch up more than this much real time in one frame. */
@@ -24,7 +24,7 @@ const NOTICE_MS = 2200;
 const DRAG_THRESHOLD = 24;
 
 /** @typedef {'intro' | 'playing' | 'paused' | 'ended'} GamePhase */
-/** @typedef {'neutral' | 'happy' | 'alert' | 'sad'} Mood */
+/** @typedef {import('./ui/byte.js').Mood} Mood */
 
 /**
  * @typedef {object} GameUi
@@ -41,8 +41,9 @@ const DRAG_THRESHOLD = 24;
  * @param {number} deps.seed
  * @param {GameUi} deps.ui
  * @param {(state: SimState, view: ViewState) => void} deps.draw
+ * @param {boolean} [deps.reducedMotion] The player asked their device for less motion.
  */
-export function createGame({ seed, ui, draw }) {
+export function createGame({ seed, ui, draw, reducedMotion = false }) {
   /** @type {SimState} */
   let state = createInitialState({ seed });
   /** @type {GamePhase} */
@@ -76,7 +77,11 @@ export function createGame({ seed, ui, draw }) {
   /** @type {{ x: number, y: number, moved: boolean } | null} */
   let dragOrigin = null;
   /** @type {ViewState} */
-  const view = { hoverId: null, flashes: new Map(), now: 0, service, drag: null, effects: [], happyUntil: new Map(), byteMood: 'neutral' };
+  const view = { hoverId: null, flashes: new Map(), now: 0, service, drag: null, anim: createAnimator(), reducedMotion };
+  /** Manual stepping, for recordings: the frame loop draws but does not advance. */
+  let manual = false;
+  /** Time spent drawing, for performance checks: a ring of the last 240 frames, ms. */
+  const drawTimes = /** @type {number[]} */ ([]);
 
   /** @param {string} text */
   function notice(text) {
@@ -120,54 +125,31 @@ export function createGame({ seed, ui, draw }) {
     });
   }
 
-  /**
-   * @param {number} x
-   * @param {number} y
-   * @param {string} text
-   * @param {string} color
-   */
-  function effect(x, y, text, color) {
-    view.effects = view.effects.filter((fx) => fx.until > view.now);
-    view.effects.push({ x, y, text, color, start: view.now, until: view.now + 1100 });
-  }
+  /** Byte's caption mood, as a face. @type {Readonly<Record<Mood, import('./view/animator.js').ByteExpression>>} */
+  const BYTE_FACE = { neutral: 'neutral', happy: 'happy', alert: 'alert', sad: 'sad', thinking: 'thinking', celebrate: 'celebrate' };
 
   /**
+   * Interface reactions to a tick's events: refusals, ticket stamps and
+   * Byte's lines. Animation is started separately, by the animator.
    * @param {readonly SimEvent[]} events
-   * @param {Map<number, { spot: number | null, tableId: number | null }>} before Where each guest was before this tick.
+   * @param {Map<number, { spot: number | null }>} before Where each guest was before this tick.
    */
   function handleEvents(events, before) {
     for (const e of events) {
-      const id = Number(e.guestId);
-      const was = before.get(id);
-      const spotArea = was && was.spot !== null ? HIT_AREAS.find((a) => a.target.kind === 'spot' && a.target.index === was.spot) : undefined;
-      const tableArea = was && was.tableId !== null ? HIT_AREAS.find((a) => a.target.kind === 'table' && a.target.tableId === was.tableId) : undefined;
+      const was = before.get(Number(e.guestId));
       switch (e.type) {
         case 'tapRejected':
           notice(rejectionText(String(e.reason)));
           break;
         case 'itemHandedOver':
-          // The completed transaction: the guest is pleased, the coins show
-          // at the counter, and the ticket is stamped.
-          view.happyUntil.set(id, view.now + 1400);
-          if (spotArea) {
-            const c = centreOf(spotArea);
-            // Above the guest's bubble, so it never covers a question that follows.
-            effect(c.x, spotArea.y - 38, `+${e.coins}`, '#ffe08a');
-            ui.receipt(was?.spot ?? -1, `Paid +${e.coins}`, view.now + 1500);
-          }
+          // The completed transaction: the ticket is stamped.
+          if (was && was.spot !== null) ui.receipt(was.spot, `Paid +${e.coins}`, view.now + 1500);
           break;
         case 'questionAnswered':
           questionsAnswered += 1;
-          view.happyUntil.set(id, view.now + 1000);
-          break;
-        case 'guestLeftHappy':
-          if (Number(e.tip) > 0 && tableArea) effect(centreOf(tableArea).x, tableArea.y + 30, `+${e.tip} tip`, '#bee86f');
           break;
         case 'guestLeftUnhappy':
-          if (spotArea) {
-            effect(centreOf(spotArea).x, spotArea.y + 40, 'left', '#ff9d8f');
-            ui.receipt(was?.spot ?? -1, 'Walked out', view.now + 1500);
-          }
+          if (was && was.spot !== null) ui.receipt(was.spot, 'Walked out', view.now + 1500);
           break;
         default:
           break;
@@ -176,7 +158,7 @@ export function createGame({ seed, ui, draw }) {
     const reaction = byte.onTick(state, events, service.cards(state));
     if (reaction !== null) {
       byteLine = reaction;
-      view.byteMood = reaction.mood;
+      view.anim.react(BYTE_FACE[reaction.mood] ?? 'neutral');
       // Urgent reactions are never hidden behind a notice.
       if (view.now >= noticeUntil || reaction.urgent) clearNotice();
     }
@@ -194,12 +176,11 @@ export function createGame({ seed, ui, draw }) {
       }
     }
     if (commands.length > 0) commandLog.push({ tick: state.tick, commands });
-    /** @type {Map<number, { spot: number | null, tableId: number | null }>} */
-    const before = new Map(
-      state.guests.map((g) => [g.id, { spot: g.place.kind === 'spot' ? g.place.index : null, tableId: g.place.kind === 'table' ? g.place.tableId : null }]),
-    );
+    /** @type {Map<number, { spot: number | null }>} */
+    const before = new Map(state.guests.map((g) => [g.id, { spot: g.place.kind === 'spot' ? g.place.index : null }]));
     const events = step(state, commands);
     service.onTick(state, events, tickets);
+    view.anim.onEvents(events, state);
     handleEvents(events, before);
     if (state.phase === 'ended') {
       view.drag = null;
@@ -210,11 +191,17 @@ export function createGame({ seed, ui, draw }) {
     }
   }
 
-  /** @param {number} now */
-  function frame(now) {
+  /**
+   * Advances the game by `elapsed` milliseconds of real time, then draws.
+   * @param {number} now
+   * @param {number} elapsed
+   */
+  function advanceAndDraw(now, elapsed) {
     view.now = now;
-    const elapsed = Math.min(now - lastFrame, MAX_FRAME_MS);
-    lastFrame = now;
+    // The visual clock runs with the game and stops when it is paused, so
+    // nothing on screen moves on while the rules are frozen.
+    const visual = phase === 'playing' ? elapsed * speed : phase === 'paused' ? 0 : elapsed;
+    view.anim.advance(visual);
     if (phase === 'playing') {
       accumulator += elapsed * speed;
       let budget = 4000;
@@ -227,8 +214,19 @@ export function createGame({ seed, ui, draw }) {
         ui.say(byteLine.text, byteLine.mood);
       }
     }
+    view.anim.sync(state, visual);
     ui.update(state, service, now);
+    const t0 = performance.now();
     draw(state, view);
+    drawTimes.push(performance.now() - t0);
+    if (drawTimes.length > 240) drawTimes.shift();
+  }
+
+  /** @param {number} now */
+  function frame(now) {
+    const elapsed = Math.min(now - lastFrame, MAX_FRAME_MS);
+    lastFrame = now;
+    if (!manual) advanceAndDraw(now, elapsed);
     requestAnimationFrame(frame);
   }
 
@@ -240,13 +238,11 @@ export function createGame({ seed, ui, draw }) {
     view.service = service;
     byte = createByte();
     byteLine = { text: '', mood: 'neutral' };
-    view.byteMood = 'neutral';
+    view.anim = createAnimator();
     noticeUntil = 0;
     accumulator = 0;
     questionsAnswered = 0;
     view.flashes.clear();
-    view.effects = [];
-    view.happyUntil.clear();
     view.drag = null;
     dragOrigin = null;
     ui.say('', 'neutral');
@@ -443,6 +439,27 @@ export function createGame({ seed, ui, draw }) {
       setAutoplayer(player) {
         autoplayer = player;
       },
+      /**
+       * Recording mode: frames are produced only by advance(), so a capture
+       * gets every frame at an exact time step, however slowly it is taken.
+       * @param {boolean} on
+       */
+      setManual(on) {
+        manual = on;
+        accumulator = 0;
+      },
+      /** @param {number} ms Real time to advance, then draw one frame. */
+      advance(ms) {
+        advanceAndDraw(view.now + ms, Math.min(ms, MAX_FRAME_MS));
+      },
+      /** Average and worst draw time over the last frames, ms. */
+      drawStats() {
+        const sorted = [...drawTimes].sort((a, b) => a - b);
+        const mean = sorted.reduce((a, b) => a + b, 0) / Math.max(1, sorted.length);
+        return { frames: sorted.length, mean, p95: sorted[Math.floor(sorted.length * 0.95)] ?? 0, max: sorted[sorted.length - 1] ?? 0 };
+      },
+      /** The animator, read-only, for checks. */
+      anim: () => view.anim,
     },
   };
 }

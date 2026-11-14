@@ -105,9 +105,31 @@ export function createService() {
     const mine = madeFor[item] === guestId;
     const spare = madeFor[item] === null;
     if (itemReady(state, item) && (mine || spare)) return 'ready';
-    if (mine && item === 'latte' && state.machine.slots.some((s) => s.state === 'brewing')) return 'preparing';
+    const brewing = item === 'latte' && state.machine.slots.some((s) => s.state === 'brewing');
+    if (mine && brewing) return 'preparing';
+    // A latte brewing for nobody in particular goes to the longest-waiting
+    // latte ticket that has nothing else on the way, so that ticket shows it.
+    if (spare && brewing && firstUnassignedLatte(state) === guestId) return 'preparing';
     if ([...intents.values()].some((i) => i.ticket === guestId)) return 'starting';
     return 'new';
+  }
+
+  /**
+   * The lowest-numbered latte ticket at the counter with no latte tagged or
+   * being started for it.
+   * @param {SimState} state
+   * @returns {number | null}
+   */
+  function firstUnassignedLatte(state) {
+    let best = null;
+    for (const id of state.spots) {
+      if (id === null) continue;
+      const found = find(state, id);
+      if (!found || found.spec.order !== 'latte' || found.guest.state !== 'waiting' || found.guest.attendedBy !== null) continue;
+      if ([...intents.values()].some((i) => i.ticket === id)) continue;
+      if (best === null || id < best) best = id;
+    }
+    return best;
   }
 
   /**

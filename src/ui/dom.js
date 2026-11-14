@@ -156,6 +156,11 @@ export function createUi(handlers) {
 
   let lastLabelTick = -1000;
   let lastWallet = 0;
+  let lastHappy = 0;
+  let lastLost = 0;
+  let lastQuestions = 0;
+  /** Which guest each rail card showed last frame, to animate a new arrival. */
+  const shownOnCard = /** @type {(number | null)[]} */ (Array.from({ length: RAIL_SLOTS }, () => null));
   let playing = false;
   /** @type {{ text: string, until: number }[]} */
   const receipts = Array.from({ length: RAIL_SLOTS }, () => ({ text: '', until: 0 }));
@@ -180,7 +185,14 @@ export function createUi(handlers) {
       const disabled = true;
       if (c.card.disabled !== disabled) c.card.disabled = disabled;
       setAttr(c.card, 'aria-label', slot < 3 ? `Counter spot ${slot + 1}: empty` : 'Door: nobody waiting');
+      shownOnCard[slot] = null;
       return;
+    }
+    if (shownOnCard[slot] !== model.guestId) {
+      // A new ticket slides in. Restarting the animation needs a reflow.
+      c.card.classList.remove('enter');
+      void c.card.offsetWidth;
+      c.card.classList.add('enter');
     }
     setData(c.card, 'kind', model.kind);
     setData(c.card, 'status', model.status);
@@ -195,6 +207,18 @@ export function createUi(handlers) {
     const disabled = !playing || slot >= 3;
     if (c.card.disabled !== disabled) c.card.disabled = disabled;
     setAttr(c.card, 'aria-label', model.label);
+    shownOnCard[slot] = model.guestId;
+  }
+
+  /**
+   * Restarts a short CSS animation on a HUD figure when it changes.
+   * @param {HTMLElement} node
+   * @param {string} name
+   */
+  function bump(node, name) {
+    node.classList.remove(name);
+    void node.offsetWidth;
+    node.classList.add(name);
   }
 
   return {
@@ -209,7 +233,16 @@ export function createUi(handlers) {
       setText(time, state.phase === 'ended' ? 'Closed' : left > 0 ? clockText(left) : 'Closing');
       setText(coins, String(state.economy.wallet));
       setText(happy, String(state.metrics.guests.leftHappy));
-      setText(lost, String(state.metrics.guests.leftUnhappy + state.metrics.guests.walkedPast));
+      const lostCount = state.metrics.guests.leftUnhappy + state.metrics.guests.walkedPast;
+      setText(lost, String(lostCount));
+      if (state.metrics.guests.leftHappy > lastHappy) bump(happy, 'bump');
+      if (lostCount > lastLost) bump(lost, 'shake');
+      if (state.metrics.ownerTicks.answer > lastQuestions && state.owner.action?.kind !== 'answer') bump(questions, 'bump');
+      lastHappy = state.metrics.guests.leftHappy;
+      lastLost = lostCount;
+      if (state.owner.action?.kind !== 'answer') lastQuestions = state.metrics.ownerTicks.answer;
+      // The last fifteen seconds of the shift.
+      setData(time, 'warn', left > 0 && left <= 15 * TICKS_PER_SECOND && state.phase !== 'ended' ? 'yes' : 'no');
       // Owner time spent answering questions: what the interruptions cost.
       setText(questions, `${Math.round(state.metrics.ownerTicks.answer / TICKS_PER_SECOND)}s`);
       if (state.economy.wallet > lastWallet) {
@@ -229,6 +262,15 @@ export function createUi(handlers) {
         action ? { label: actionName(action.kind, action.claims.tableId), hint: 'Now', cancel: 'Cancel' } : null,
         ...state.owner.queue.map((q) => ({ label: actionName(q.kind, q.tableId), hint: 'Next', cancel: 'Remove' })),
       ];
+      // The current action's chip fills as the work is done.
+      let progress = 0;
+      if (action) {
+        const t = state.timing;
+        const total = action.phase === 'travelling' ? t.travel : action.kind === 'wash' ? t.washPerDish : t[action.kind];
+        progress = action.phase === 'travelling' ? 0 : Math.max(0, Math.min(1, 1 - action.ticksLeft / total));
+      }
+      const p = `${Math.round(progress * 100)}%`;
+      if (chips[0].style.getPropertyValue('--p') !== p) chips[0].style.setProperty('--p', p);
       chips.forEach((chip, slot) => {
         const entry = entries[slot] ?? null;
         if (chip.disabled !== (entry === null)) chip.disabled = entry === null;
@@ -255,7 +297,7 @@ export function createUi(handlers) {
 
     /**
      * @param {string} text
-     * @param {'neutral' | 'happy' | 'alert' | 'sad' | 'notice'} mood
+     * @param {import('./byte.js').Mood | 'notice'} mood
      */
     say(text, mood) {
       setText(byteText, text);
@@ -281,6 +323,9 @@ export function createUi(handlers) {
       for (const button of targetButtons.values()) button.disabled = !playing;
       if (phase === 'intro' || phase === 'ended') {
         lastWallet = 0;
+        lastHappy = 0;
+        lastLost = 0;
+        lastQuestions = 0;
         for (const r of receipts) r.until = 0;
       }
     },

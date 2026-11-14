@@ -15,7 +15,7 @@
  * @param {number} w
  * @param {number} h
  * @param {number} r
- * @param {string} fill
+ * @param {string | CanvasGradient} fill
  * @param {string | null} [stroke]
  * @param {number} [sw]
  */
@@ -301,7 +301,7 @@ export function topicIcon(cx, topic, x, y, s) {
   const ink = '#5b3a1e';
   cx.strokeStyle = ink;
   cx.fillStyle = ink;
-  cx.lineWidth = Math.max(2.5, s * 0.1);
+  cx.lineWidth = Math.max(1, s * 0.1);
   cx.lineCap = 'round';
   switch (topic) {
     case 'wifi':

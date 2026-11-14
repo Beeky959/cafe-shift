@@ -14,7 +14,7 @@
 import { TICKS_PER_SECOND } from '../sim/index.js';
 import { QUESTIONS, STATION_NAME } from './service.js';
 
-/** @typedef {'neutral' | 'happy' | 'alert' | 'sad'} Mood */
+/** @typedef {'neutral' | 'happy' | 'alert' | 'sad' | 'thinking' | 'celebrate'} Mood */
 /**
  * @typedef {object} Reaction
  * @property {string} text
@@ -44,6 +44,10 @@ export function createByte() {
   let streak = 0;
   let idleTicks = 0;
   let latteReadySince = -1;
+  /** Ticks at which recent orders were handed over, for spotting a rush handled well. */
+  /** @type {number[]} */
+  let served = [];
+  let lastLossTick = Number.NEGATIVE_INFINITY;
 
   return {
     onTick(state, events, cards) {
@@ -70,6 +74,7 @@ export function createByte() {
             break;
           case 'guestLeftUnhappy':
             streak = 0;
+            lastLossTick = tick;
             react(1, `lost-${id}`, 'sad', e.wasAsking ? `Ticket ${id} left without an answer. A question holds a spot, then costs a guest.` : `Ticket ${id} walked out unserved. A red bar means seconds left.`);
             break;
           case 'guestWalkedPast':
@@ -91,7 +96,10 @@ export function createByte() {
           case 'itemHandedOver': {
             const guest = state.guests.find((g) => g.id === id);
             streak = guest?.tipEligible ? streak + 1 : 0;
-            if (streak === 3) react(4, 'streak', 'happy', 'Three quick ones in a row. That is the rhythm.', s(20));
+            if (streak === 3) react(4, 'streak', 'celebrate', 'Three quick ones in a row. That is the rhythm.', s(20));
+            // A rush handled: four served within twenty seconds, nobody lost meanwhile.
+            served = [...served.filter((t) => tick - t < s(20)), tick];
+            if (served.length >= 4 && tick - lastLossTick > s(20)) react(3, 'rush', 'celebrate', `${served.length} served in twenty seconds and nobody left. Rush handled!`, s(30));
             break;
           }
           case 'guestLeftHappy':
@@ -138,6 +146,13 @@ export function createByte() {
       if (latteReadySince >= 0 && tick - latteReadySince >= s(4) && anotherLatte) {
         react(3, 'machineBlocked', 'alert', 'A finished latte is sitting on the machine. Deliver it so the next one can brew.', s(12));
       }
+      if (clean === 1 && dirty >= 2 && state.owner.action?.kind !== 'wash') {
+        react(4, 'lowDishes', 'thinking', `One clean dish left and ${dirty} in the sink. A wash soon would help.`, s(20));
+      }
+      const readyCount = counter.filter((c) => c.kind === 'order' && c.status === 'ready').length;
+      if (readyCount >= 2) {
+        react(3, 'manyReady', 'alert', `${readyCount} orders are ready at once. Carry them before they wait too long.`, s(15));
+      }
       if (state.tables.every((t) => t.state === 'dirty') && counter.some((c) => c.kind === 'order' && c.status !== 'new')) {
         react(3, 'tables', 'alert', 'Every table is dirty. The next guest will stand, and standing guests do not tip.', s(15));
       }
@@ -151,11 +166,11 @@ export function createByte() {
       const ownerIdle = state.owner.action === null && state.owner.queue.length === 0;
       idleTicks = ownerIdle && (ready || fresh || asking || chores) ? idleTicks + 1 : 0;
       if (idleTicks >= s(3)) {
-        if (ready) react(5, 'idle', 'neutral', `Ticket ${ready.guestId}'s ${ready.order} is ready. Carry it to them.`, s(8));
-        else if (asking) react(5, 'idle', 'neutral', `Ticket ${asking.guestId} has a question waiting.`, s(8));
-        else if (fresh) react(5, 'idle', 'neutral', `Ticket ${fresh.guestId} wants a ${fresh.order}. Pick the ticket, then the ${STATION_NAME[fresh.order]}.`, s(8));
-        else if (dirty > 0) react(5, 'idle', 'neutral', `A quiet moment, and ${dirty} dirty ${dirty === 1 ? 'dish' : 'dishes'} in the sink.`, s(8));
-        else react(5, 'idle', 'neutral', 'A quiet moment. A table needs wiping.', s(8));
+        if (ready) react(5, 'idle', 'thinking', `Ticket ${ready.guestId}'s ${ready.order} is ready. Carry it to them.`, s(8));
+        else if (asking) react(5, 'idle', 'thinking', `Ticket ${asking.guestId} has a question waiting.`, s(8));
+        else if (fresh) react(5, 'idle', 'thinking', `Ticket ${fresh.guestId} wants a ${fresh.order}. Pick the ticket, then the ${STATION_NAME[fresh.order]}.`, s(8));
+        else if (dirty > 0) react(5, 'idle', 'thinking', `A quiet moment, and ${dirty} dirty ${dirty === 1 ? 'dish' : 'dishes'} in the sink.`, s(8));
+        else react(5, 'idle', 'thinking', 'A quiet moment. A table needs wiping.', s(8));
       }
 
       if (found.length === 0) return null;

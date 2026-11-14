@@ -43,7 +43,7 @@ test('simulation modules use no DOM, canvas, audio, clock or unseeded randomness
 });
 
 test('the layout, the labels and Byte\'s lines are pure too, so they can be tested without a browser', async () => {
-  for (const file of ['view/scene.js', 'ui/labels.js', 'ui/byte.js']) {
+  for (const file of ['view/scene.js', 'view/clips.js', 'view/animator.js', 'ui/labels.js', 'ui/byte.js']) {
     const code = stripComments(await readFile(new URL(`../src/${file}`, import.meta.url), 'utf8'));
     for (const pattern of FORBIDDEN) {
       assert.equal(pattern.test(code), false, `${file} uses ${pattern}`);
@@ -52,10 +52,17 @@ test('the layout, the labels and Byte\'s lines are pure too, so they can be test
 });
 
 test('only the game loop advances the simulation; the view and the interface never call step', async () => {
-  for (const file of ['view/renderer.js', 'view/art.js', 'view/scene.js', 'ui/dom.js', 'ui/labels.js', 'ui/byte.js', 'main.js']) {
+  for (const file of ['view/renderer.js', 'view/art.js', 'view/scene.js', 'view/clips.js', 'view/animator.js', 'view/characters.js', 'view/props.js', 'view/tapit.js', 'ui/dom.js', 'ui/labels.js', 'ui/byte.js', 'main.js']) {
     const code = stripComments(await readFile(new URL(`../src/${file}`, import.meta.url), 'utf8'));
     assert.equal(/\bstep\s*\(/.test(code), false, `${file} calls step`);
     assert.equal(/\bimport\b[^;]*\bstep\b[^;]*from/.test(code), false, `${file} imports step`);
+  }
+});
+
+test('TapIt is drawings only: the game does not import its components yet', async () => {
+  for (const file of ['main.js', 'game.js', 'view/renderer.js', 'view/props.js', 'view/characters.js', 'view/animator.js', 'view/clips.js', 'ui/dom.js', 'ui/service.js', 'ui/byte.js']) {
+    const code = stripComments(await readFile(new URL(`../src/${file}`, import.meta.url), 'utf8'));
+    assert.equal(/tapit/i.test(code), false, `${file} refers to TapIt`);
   }
 });
 
