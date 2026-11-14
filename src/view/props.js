@@ -31,23 +31,24 @@ export const PROPS = Object.freeze({
  * @param {Ctx} cx
  */
 export function drawBackground(cx) {
-  // Ceiling beam and wall.
+  // Ceiling beam and wall — warm cream gradient.
   const wall = cx.createLinearGradient(0, 40, 0, 270);
-  wall.addColorStop(0, '#f6e1b6');
-  wall.addColorStop(1, '#ecd09c');
+  wall.addColorStop(0, '#f8e7c8');
+  wall.addColorStop(1, '#f0d4a8');
   cx.fillStyle = wall;
   cx.fillRect(0, 0, SCENE_WIDTH, 270);
   // Wainscot below the picture rail, down to the floor, at both ends of the bar.
-  rounded(cx, 0, 202, SCENE_WIDTH, 160, 0, '#c99a68');
-  for (let x = 6; x < SCENE_WIDTH; x += 34) rounded(cx, x, 214, 26, 140, 3, '#bd8c5c');
-  // Wallpaper stripes.
+  rounded(cx, 0, 202, SCENE_WIDTH, 160, 0, '#c09060');
+  for (let x = 6; x < SCENE_WIDTH; x += 34) rounded(cx, x, 214, 26, 140, 3, '#b4845a');
+  // Wallpaper stripes — subtle warm pattern.
   for (let x = 0; x < SCENE_WIDTH; x += 40) {
-    cx.fillStyle = x % 80 === 0 ? '#ffffff14' : '#c9a06a10';
+    cx.fillStyle = x % 80 === 0 ? '#ffffff18' : '#c9a06a12';
     cx.fillRect(x, 42, 20, 160);
   }
-  rounded(cx, 0, 0, SCENE_WIDTH, 34, 0, '#b8774c');
-  for (let x = 0; x < SCENE_WIDTH; x += 120) rounded(cx, x, 0, 6, 34, 0, '#9c6240');
-  rounded(cx, 0, 34, SCENE_WIDTH, 8, 0, '#7e4d36');
+  // Ceiling beam with trim.
+  rounded(cx, 0, 0, SCENE_WIDTH, 34, 0, '#a87050');
+  for (let x = 0; x < SCENE_WIDTH; x += 120) rounded(cx, x, 0, 6, 34, 0, '#8e5c3e');
+  rounded(cx, 0, 34, SCENE_WIDTH, 8, 0, '#7a4e36');
   // Picture rail.
   rounded(cx, 0, 196, SCENE_WIDTH, 6, 0, '#b88a5c');
 
@@ -55,33 +56,44 @@ export function drawBackground(cx) {
   const w = PROPS.window;
   rounded(cx, w.x - 10, w.y - 10, w.w + 20, w.h + 22, 12, '#6b4335');
   const sky = cx.createLinearGradient(0, w.y, 0, w.y + w.h);
-  sky.addColorStop(0, '#bfe5e6');
-  sky.addColorStop(1, '#f3e6c4');
+  sky.addColorStop(0, '#a8d4e8');
+  sky.addColorStop(1, '#f0e0c0');
   rounded(cx, w.x, w.y, w.w, w.h, 6, sky);
   cx.save();
   cx.beginPath();
   cx.roundRect(w.x, w.y, w.w, w.h, 6);
   cx.clip();
-  oval(cx, w.x + 196, w.y + 30, 18, 18, '#fff4c4');
+  // Sun.
+  const sunG = cx.createRadialGradient(w.x + 196, w.y + 30, 4, w.x + 196, w.y + 30, 28);
+  sunG.addColorStop(0, '#fff8d8');
+  sunG.addColorStop(0.5, '#fff4c480');
+  sunG.addColorStop(1, '#fff4c400');
+  cx.fillStyle = sunG;
+  cx.fillRect(w.x + 168, w.y + 2, 56, 56);
+  oval(cx, w.x + 196, w.y + 30, 14, 14, '#fff6d0');
+  // Hills.
   poly(cx, [[w.x, w.y + 92], [w.x + 46, w.y + 58], [w.x + 92, w.y + 80], [w.x + 150, w.y + 46], [w.x + 210, w.y + 84], [w.x + w.w, w.y + 66], [w.x + w.w, w.y + w.h], [w.x, w.y + w.h]], '#9fb7a0');
   poly(cx, [[w.x, w.y + 106], [w.x + 70, w.y + 86], [w.x + 140, w.y + 100], [w.x + 200, w.y + 82], [w.x + w.w, w.y + 98], [w.x + w.w, w.y + w.h], [w.x, w.y + w.h]], '#7d9a8a');
-  // Trees across the street.
+  // Trees across the street — fuller canopies.
   for (const [tx, r] of [[w.x + 30, 16], [w.x + 118, 20], [w.x + 226, 15]]) {
     rounded(cx, tx - 3, w.y + w.h - 30, 6, 30, 2, '#6b5040');
-    oval(cx, tx, w.y + w.h - 38, r, r * 1.1, '#5f8b62');
+    oval(cx, tx - 4, w.y + w.h - 36, r * 0.7, r * 0.9, '#4f7a52');
+    oval(cx, tx + 4, w.y + w.h - 40, r * 0.8, r * 1.0, '#5f8b62');
+    oval(cx, tx, w.y + w.h - 42, r, r * 1.1, '#6a9a6a');
   }
   cx.restore();
   rounded(cx, w.x + w.w / 2 - 5, w.y, 10, w.h, 0, '#6b4335');
   rounded(cx, w.x, w.y + 52, w.w, 8, 0, '#6b4335');
   rounded(cx, w.x - 16, w.y + w.h + 8, w.w + 32, 10, 4, '#8a5a40');
-  // Shelf plants on the sill.
+  // Shelf plants on the sill — richer greens with pot detail.
   for (const px of [w.x + 20, w.x + w.w - 28]) {
     rounded(cx, px - 9, w.y + w.h - 10, 18, 16, 4, '#c97a52', '#6b4335', 2);
-    for (const [dx, dy] of [[-8, -14], [0, -20], [8, -14], [-4, -8], [5, -9]]) oval(cx, px + dx, w.y + w.h - 8 + dy, 6, 9, '#6f9b5f');
+    rounded(cx, px - 7, w.y + w.h - 8, 14, 4, 2, '#b06a45');
+    for (const [dx, dy] of [[-8, -14], [0, -20], [8, -14], [-4, -8], [5, -9]]) oval(cx, px + dx, w.y + w.h - 8 + dy, 6, 9, dy < -15 ? '#7fae6f' : '#6a9960');
   }
-  // Sunlight falling from the window.
+  // Sunlight falling from the window — warmer and stronger.
   const beam = cx.createLinearGradient(w.x, w.y, w.x - 80, 330);
-  beam.addColorStop(0, '#fff6d630');
+  beam.addColorStop(0, '#fff6d640');
   beam.addColorStop(1, '#fff6d600');
   cx.fillStyle = beam;
   cx.beginPath();
@@ -91,10 +103,23 @@ export function drawBackground(cx) {
   cx.lineTo(w.x - 120, 330);
   cx.closePath();
   cx.fill();
+  // Second, narrower beam from the right pane.
+  const beam2 = cx.createLinearGradient(w.x + w.w / 2, w.y, w.x + w.w / 2 + 40, 330);
+  beam2.addColorStop(0, '#fff6d625');
+  beam2.addColorStop(1, '#fff6d600');
+  cx.fillStyle = beam2;
+  cx.beginPath();
+  cx.moveTo(w.x + w.w / 2 + 10, w.y + w.h);
+  cx.lineTo(w.x + w.w, w.y + w.h);
+  cx.lineTo(w.x + w.w - 40, 330);
+  cx.lineTo(w.x + w.w / 2 - 50, 330);
+  cx.closePath();
+  cx.fill();
 
-  // Menu board.
+  // Menu board — richer green with better chalk rendering.
   rounded(cx, 58, 48, 262, 102, 10, '#6e4632');
-  rounded(cx, 66, 56, 246, 86, 6, '#2c3b33');
+  rounded(cx, 60, 50, 258, 98, 8, '#5a3d2c');
+  rounded(cx, 66, 56, 246, 86, 6, '#1e2e26');
   textAt(cx, 'GOOD BEANS', 189, 82, 20, '#f6dea2', 1000);
   cx.strokeStyle = '#f6dea266';
   cx.lineWidth = 1.5;
@@ -102,6 +127,9 @@ export function drawBackground(cx) {
   cx.moveTo(110, 90);
   cx.lineTo(268, 90);
   cx.stroke();
+  // Chalk dust effect.
+  cx.fillStyle = '#f3ead40a';
+  cx.fillRect(66, 56, 246, 86);
   const items = [['Latte', '8'], ['Croissant', '6'], ['Espresso', '5'], ['Mocha', '7']];
   items.forEach(([name, price], i) => {
     const col = i % 2;
@@ -109,31 +137,60 @@ export function drawBackground(cx) {
     textAt(cx, name, 82 + col * 122, 112 + row * 22, 13, '#f3ead4', 800, 'left');
     textAt(cx, price, 176 + col * 122, 112 + row * 22, 13, '#bfe79a', 900, 'right');
   });
-  // Chalk doodle cup.
+  // Chalk doodle cup and steam.
   cx.strokeStyle = '#f3ead466';
   cx.lineWidth = 2;
   cx.beginPath();
   cx.arc(296, 74, 7, 0, Math.PI);
   cx.stroke();
+  cx.beginPath();
+  cx.moveTo(293, 68);
+  cx.quadraticCurveTo(295, 60, 292, 55);
+  cx.moveTo(299, 68);
+  cx.quadraticCurveTo(301, 62, 298, 56);
+  cx.stroke();
 
-  // Framed print and a small clock.
+  // Framed print — warmer tones with mat border.
   rounded(cx, 852, 48, 82, 92, 6, '#6b4335');
+  rounded(cx, 856, 52, 74, 84, 4, '#e8dac4');
   rounded(cx, 860, 56, 66, 76, 3, '#f1e3c7');
   oval(cx, 893, 86, 18, 18, '#d98a5a');
+  // Warmer coffee-art tones.
+  oval(cx, 893, 86, 12, 12, '#e8a66a');
   cup(cx, 893, 108, 28);
   textAt(cx, 'EST. 2024', 893, 128, 9, '#6b4335', 900);
 
-  // Hanging lights: cords and shades. The glow is drawn separately.
+  // Hanging lights: cords, shades and warm bulb glow.
   for (const lx of LIGHTS) {
     rounded(cx, lx - 1.5, 0, 3, 64, 0, '#4a3530');
-    poly(cx, [[lx - 22, 64], [lx + 22, 64], [lx + 32, 86], [lx - 32, 86]], '#2f5d50');
-    rounded(cx, lx - 32, 84, 64, 5, 2, '#24483e');
-    oval(cx, lx, 90, 11, 5, '#fff1c2');
+    // Shade — deeper green with rim highlight.
+    poly(cx, [[lx - 22, 64], [lx + 22, 64], [lx + 32, 86], [lx - 32, 86]], '#2a5448');
+    rounded(cx, lx - 32, 84, 64, 5, 2, '#204038');
+    // Inner shade glow.
+    const shadeGlow = cx.createLinearGradient(lx - 28, 70, lx + 28, 70);
+    shadeGlow.addColorStop(0, '#ffe8c030');
+    shadeGlow.addColorStop(0.5, '#ffe8c050');
+    shadeGlow.addColorStop(1, '#ffe8c020');
+    cx.fillStyle = shadeGlow;
+    cx.beginPath();
+    cx.moveTo(lx - 20, 66);
+    cx.lineTo(lx + 20, 66);
+    cx.lineTo(lx + 30, 84);
+    cx.lineTo(lx - 30, 84);
+    cx.closePath();
+    cx.fill();
+    // Bulb with warm halo.
+    const bulbGlow = cx.createRadialGradient(lx, 88, 3, lx, 88, 20);
+    bulbGlow.addColorStop(0, '#ffe8c0cc');
+    bulbGlow.addColorStop(1, '#ffe8c000');
+    cx.fillStyle = bulbGlow;
+    cx.fillRect(lx - 20, 72, 40, 32);
+    oval(cx, lx, 90, 11, 5, '#ffe8c0');
   }
 
-  // Back bar: tiled splashback, then the bar top and its panelled front.
-  rounded(cx, 20, 200, 900, 60, 0, '#efe6d6');
-  cx.strokeStyle = '#d9cdb8';
+  // Back bar: tiled splashback with warmer subway tiles, then the bar top and its panelled front.
+  rounded(cx, 20, 200, 900, 60, 0, '#f0e4d4');
+  cx.strokeStyle = '#ddd0bc';
   cx.lineWidth = 1;
   for (let y = 200; y < 260; y += 15) {
     cx.beginPath();
@@ -147,7 +204,23 @@ export function drawBackground(cx) {
       cx.stroke();
     }
   }
+  // Subtle tile sheen.
+  const tileSheen = cx.createLinearGradient(200, 200, 700, 260);
+  tileSheen.addColorStop(0, '#ffffff00');
+  tileSheen.addColorStop(0.4, '#ffffff0c');
+  tileSheen.addColorStop(0.6, '#ffffff0c');
+  tileSheen.addColorStop(1, '#ffffff00');
+  cx.fillStyle = tileSheen;
+  cx.fillRect(20, 200, 900, 60);
+  // Bar top with wood grain.
   rounded(cx, 14, PROPS.backBarTop, 912, 14, 4, '#a8704e', '#5c3c2e', 3);
+  // Highlight along the bar top edge.
+  cx.strokeStyle = '#c8946a40';
+  cx.lineWidth = 2;
+  cx.beginPath();
+  cx.moveTo(18, PROPS.backBarTop + 3);
+  cx.lineTo(920, PROPS.backBarTop + 3);
+  cx.stroke();
   rounded(cx, 18, PROPS.backBarTop + 12, 904, 60, 2, '#7a4a37');
   for (let x = 40; x < 900; x += 96) rounded(cx, x, PROPS.backBarTop + 22, 80, 40, 4, '#6a3f2f');
   // The pick-up sign hangs on the front counter (drawForeground), where the owner never hides it.
@@ -161,15 +234,15 @@ export function drawBackground(cx) {
   rounded(cx, r.x, r.y + 8, 4, 12, 1, '#6b4335');
   rounded(cx, r.x + r.w - 4, r.y + 8, 4, 12, 1, '#6b4335');
 
-  // Floor: warm planks with a little perspective.
+  // Floor: warm planks with a little perspective and richer wood tones.
   const floor = cx.createLinearGradient(0, 360, 0, SCENE_HEIGHT);
-  floor.addColorStop(0, '#c9935f');
-  floor.addColorStop(1, '#dcaa76');
+  floor.addColorStop(0, '#c99060');
+  floor.addColorStop(1, '#dca878');
   cx.fillStyle = floor;
   cx.fillRect(0, 360, SCENE_WIDTH, SCENE_HEIGHT - 360);
   for (let j = 0; j < 9; j++) {
     const y = 420 + j * j * 4.2 + j * 22;
-    cx.strokeStyle = '#a8724a55';
+    cx.strokeStyle = '#a0704855';
     cx.lineWidth = 2;
     cx.beginPath();
     cx.moveTo(0, y);
@@ -181,10 +254,16 @@ export function drawBackground(cx) {
       cx.lineTo(x, y + 18 + j * 6);
       cx.stroke();
     }
+    // Subtle wood grain variation per row.
+    if (j % 3 === 0) {
+      cx.fillStyle = '#b8804e0a';
+      cx.fillRect(0, y, SCENE_WIDTH, 18 + j * 6);
+    }
   }
-  // Sunlight on the floor.
-  const pool = cx.createRadialGradient(470, 540, 10, 470, 540, 320);
-  pool.addColorStop(0, '#fff3d022');
+  // Sunlight on the floor — warmer and larger.
+  const pool = cx.createRadialGradient(470, 520, 10, 470, 530, 340);
+  pool.addColorStop(0, '#fff3d030');
+  pool.addColorStop(0.6, '#fff3d018');
   pool.addColorStop(1, '#fff3d000');
   cx.fillStyle = pool;
   cx.fillRect(0, 360, SCENE_WIDTH, SCENE_HEIGHT - 360);
@@ -192,14 +271,32 @@ export function drawBackground(cx) {
   // Door, at the left, with an OPEN sign.
   rounded(cx, -10, 380, 40, 196, 6, '#6b4335', '#4a2e25', 4);
   rounded(cx, -4, 396, 26, 82, 4, '#bfe0dc');
-  oval(cx, 22, 500, 3.5, 3.5, '#f2c36b');
+  // Door glass reflection.
+  cx.fillStyle = '#ffffff18';
+  cx.beginPath();
+  cx.moveTo(-2, 398);
+  cx.lineTo(10, 398);
+  cx.lineTo(4, 470);
+  cx.lineTo(-2, 470);
+  cx.closePath();
+  cx.fill();
+  oval(cx, 22, 500, 3.5, 3.5, '#d4a64c');
   rounded(cx, -2, 488, 28, 16, 3, '#c0504d');
   textAt(cx, 'OPEN', 12, 500, 9, '#fff', 1000);
-  // A rug where guests queue.
-  oval(cx, 470, 540, 260, 30, '#b7744d40');
-  // Corner plant.
+  // A warm-toned rug where guests queue.
+  oval(cx, 470, 540, 260, 30, '#b07048');
+  oval(cx, 470, 540, 250, 26, '#c08058');
+  oval(cx, 470, 540, 230, 20, '#b07048');
+  cx.globalAlpha = 0.15;
+  oval(cx, 470, 540, 260, 30, '#b07048');
+  cx.globalAlpha = 1;
+  // Corner plants.
   bigPlant(cx, 30, 714, 1.1);
   bigPlant(cx, 942, 600, 0.9);
+  // Decorative shelf on the far right wall.
+  rounded(cx, 934, 120, 26, 6, 2, '#8a5a40');
+  rounded(cx, 938, 100, 18, 22, 4, '#c97a52', '#6b4335', 2);
+  for (const [dx, dy] of [[-6, -10], [0, -16], [6, -10]]) oval(cx, 947 + dx, 100 + dy, 5, 8, '#6a9960');
 }
 
 /** x positions of the hanging lights. */
@@ -212,12 +309,27 @@ export const LIGHTS = [392, 790];
  */
 export function drawLightGlow(cx) {
   for (const lx of LIGHTS) {
-    const g = cx.createRadialGradient(lx, 96, 4, lx, 150, 190);
-    g.addColorStop(0, '#ffe7a655');
+    // Primary warm cone of light.
+    const g = cx.createRadialGradient(lx, 96, 4, lx, 160, 200);
+    g.addColorStop(0, '#ffe0a060');
+    g.addColorStop(0.4, '#ffe7a630');
     g.addColorStop(1, '#ffe7a600');
     cx.fillStyle = g;
-    cx.fillRect(lx - 200, 80, 400, 260);
+    cx.fillRect(lx - 210, 80, 420, 280);
+    // Tighter bright spot directly under the shade.
+    const bright = cx.createRadialGradient(lx, 92, 2, lx, 110, 60);
+    bright.addColorStop(0, '#fffae840');
+    bright.addColorStop(1, '#fffae800');
+    cx.fillStyle = bright;
+    cx.fillRect(lx - 70, 80, 140, 80);
   }
+  // Ambient window light wash across the back wall.
+  const ambient = cx.createLinearGradient(360, 60, 720, 200);
+  ambient.addColorStop(0, '#fff6d010');
+  ambient.addColorStop(0.5, '#fff6d01a');
+  ambient.addColorStop(1, '#fff6d000');
+  cx.fillStyle = ambient;
+  cx.fillRect(360, 50, 360, 200);
 }
 
 /**
@@ -312,29 +424,54 @@ export function drawForeground(cx) {
   // Gate flap at the right end, slightly lower.
   rounded(cx, PROPS.gate.x + 4, c.y + 18, PROPS.gate.w - 4, 18, 4, '#c58e5a', '#51392f', 3);
   rounded(cx, PROPS.gate.x + 8, c.y + 34, PROPS.gate.w - 12, c.front + 10, 3, '#9c6a46', '#51392f', 3);
-  // Counter top with a lit front edge.
+  // Counter top with lit front edge and warm gradient.
   const top = cx.createLinearGradient(0, c.y, 0, c.y + c.top);
-  top.addColorStop(0, '#edbb80');
-  top.addColorStop(1, '#d39b62');
+  top.addColorStop(0, '#f0c888');
+  top.addColorStop(1, '#d4a06a');
   rounded(cx, c.x - 6, c.y, c.w + 6, c.top, 6, top, '#51392f', 4);
-  rounded(cx, c.x - 2, c.y + 4, c.w - 2, 4, 2, '#ffffff40');
+  // Front-edge highlight — a warm lit strip.
+  const edgeHighlight = cx.createLinearGradient(0, c.y + 2, 0, c.y + 10);
+  edgeHighlight.addColorStop(0, '#ffffff50');
+  edgeHighlight.addColorStop(1, '#ffffff00');
+  cx.fillStyle = edgeHighlight;
+  cx.fillRect(c.x, c.y + 2, c.w, 8);
   // Front panel with inset boards.
   const front = cx.createLinearGradient(0, c.y + c.top, 0, c.y + c.top + c.front);
-  front.addColorStop(0, '#b47a51');
-  front.addColorStop(1, '#94603f');
+  front.addColorStop(0, '#b88058');
+  front.addColorStop(1, '#986848');
   rounded(cx, c.x - 4, c.y + c.top - 4, c.w + 2, c.front + 4, 3, front, '#5c3e35', 4);
-  for (let x = 24; x < c.w - 20; x += 88) rounded(cx, x, c.y + c.top + 6, 76, c.front - 14, 3, '#a56f4a', '#7a4c33', 1.5);
+  for (let x = 24; x < c.w - 20; x += 88) {
+    rounded(cx, x, c.y + c.top + 6, 76, c.front - 14, 3, '#a87050', '#7a4c33', 1.5);
+    // Panel border highlight.
+    cx.strokeStyle = '#c8946a30';
+    cx.lineWidth = 1;
+    cx.beginPath();
+    cx.roundRect(x + 1, c.y + c.top + 7, 74, 2, 1);
+    cx.stroke();
+  }
   // Pick-up sign on the counter front, below the machine and the pastry case.
-  rounded(cx, 60, c.y + c.top + 8, 170, 24, 6, '#2c3b33', '#f6dea2', 2);
+  rounded(cx, 60, c.y + c.top + 8, 170, 24, 6, '#1e2e26', '#f6dea2', 2);
   textAt(cx, '▲ PICK-UP ▲', 145, c.y + c.top + 26, 15, '#f6dea2', 1000);
   // Register, on the counter top.
   rounded(cx, 820, c.y - 30, 64, 34, 6, '#37383d', '#20242a', 3);
   rounded(cx, 828, c.y - 24, 48, 14, 2, '#a4be86');
+  // Register screen glow.
+  const screenGlow = cx.createRadialGradient(852, c.y - 18, 4, 852, c.y - 18, 30);
+  screenGlow.addColorStop(0, '#a4be8620');
+  screenGlow.addColorStop(1, '#a4be8600');
+  cx.fillStyle = screenGlow;
+  cx.fillRect(820, c.y - 38, 64, 30);
   rounded(cx, 830, c.y - 2, 44, 6, 2, '#46474f');
   // A small plant and a sugar jar at the left end.
   rounded(cx, 24, c.y - 18, 22, 20, 5, '#c97a52', '#6b4335', 2);
-  for (const [dx, dy] of [[-8, -12], [0, -20], [8, -12]]) oval(cx, 35 + dx, c.y - 18 + dy, 7, 11, '#6f9b5f');
+  rounded(cx, 26, c.y - 16, 18, 5, 2, '#b06a45');
+  for (const [dx, dy] of [[-8, -12], [0, -20], [8, -12]]) oval(cx, 35 + dx, c.y - 18 + dy, 7, 11, dy < -15 ? '#7fae6f' : '#6a9960');
   rounded(cx, 54, c.y - 20, 18, 22, 5, '#fff7e8cc', '#8a6a52', 2);
+  // Sugar jar lid.
+  rounded(cx, 56, c.y - 22, 14, 5, 3, '#c9a478');
+  // A small napkin holder beside the register.
+  rounded(cx, 790, c.y - 14, 22, 16, 3, '#37383d', '#20242a', 2);
+  rounded(cx, 794, c.y - 18, 14, 6, 2, '#f0e4d4');
 }
 
 /**
@@ -360,13 +497,20 @@ export function drawMachine(cx, m, tag) {
   const shake = m.state === 'brewing' ? Math.sin(m.time * 60) * 0.6 : 0;
   cx.save();
   cx.translate(shake, 0);
-  // Body.
+  // Body — richer metallic gradient.
   const body = cx.createLinearGradient(M.x, 0, M.x + M.w, 0);
-  body.addColorStop(0, '#5c6668');
-  body.addColorStop(0.5, '#7b8789');
+  body.addColorStop(0, '#5a6466');
+  body.addColorStop(0.3, '#7b8789');
+  body.addColorStop(0.5, '#8a9496');
+  body.addColorStop(0.7, '#7b8789');
   body.addColorStop(1, '#4e5759');
   rounded(cx, M.x, M.y, M.w, M.h, 12, body, '#2f2a2e', 4);
-  rounded(cx, M.x + 6, M.y - 10, M.w - 12, 14, 5, '#3f4547');
+  // Top panel with brushed-metal look.
+  const topPanel = cx.createLinearGradient(M.x + 6, 0, M.x + M.w - 6, 0);
+  topPanel.addColorStop(0, '#3f4547');
+  topPanel.addColorStop(0.5, '#4a5052');
+  topPanel.addColorStop(1, '#3f4547');
+  rounded(cx, M.x + 6, M.y - 10, M.w - 12, 14, 5, topPanel);
   // Cups warming on top.
   for (const dx of [26, 52, 78, 104]) rounded(cx, M.x + dx - 9, M.y - 26, 18, 16, 4, '#fffaf0', '#6d4b42', 2);
   // Pressure gauge: the needle rises while brewing.
@@ -652,16 +796,27 @@ export function chair(cx, x, y, part) {
  */
 export function drawTableTop(cx, t) {
   oval(cx, t.x, t.y + 64, 74, 12, '#3b2a2030');
+  // Pedestal and base.
   rounded(cx, t.x - 7, t.y + 6, 14, 56, 3, '#5f3c2e');
   rounded(cx, t.x - 30, t.y + 56, 60, 8, 4, '#5f3c2e');
+  // Table underside (shadow ring).
   oval(cx, t.x, t.y + 6, 80, 26, '#7a4c33');
-  oval(cx, t.x, t.y, 80, 26, '#d7a46a');
+  // Table top with warm wood gradient.
+  const tableGrad = cx.createRadialGradient(t.x - 10, t.y - 4, 10, t.x, t.y, 80);
+  tableGrad.addColorStop(0, '#e0b47a');
+  tableGrad.addColorStop(1, '#d0a060');
+  cx.fillStyle = tableGrad;
+  cx.beginPath();
+  cx.ellipse(t.x, t.y, 80, 26, 0, 0, Math.PI * 2);
+  cx.fill();
   cx.strokeStyle = '#51392f';
   cx.lineWidth = 4;
   cx.beginPath();
   cx.ellipse(t.x, t.y, 80, 26, 0, 0, Math.PI * 2);
   cx.stroke();
-  oval(cx, t.x - 20, t.y - 8, 40, 8, '#ffffff22');
+  // Warm highlight on the table top.
+  oval(cx, t.x - 20, t.y - 8, 40, 8, '#ffffff28');
+  oval(cx, t.x - 30, t.y - 4, 20, 5, '#ffffff12');
   if (t.dirt > 0.01) {
     cx.globalAlpha = Math.min(1, t.dirt);
     cx.strokeStyle = '#8a5a3c';

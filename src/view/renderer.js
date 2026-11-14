@@ -181,6 +181,14 @@ export function createRenderer(canvas) {
     }
 
     // ---- Byte, hovering by the window.
+    // Byte's subtle ground shadow
+    cx.save();
+    cx.globalAlpha = 0.18;
+    cx.fillStyle = '#3b2a20';
+    cx.beginPath();
+    cx.ellipse(STAGE.byte.x, STAGE.byte.y + 68, 28, 8, 0, 0, Math.PI * 2);
+    cx.fill();
+    cx.restore();
     const anxious = state.guests.some((g) => g.place.kind === 'spot' && guestClip(state, g).mood === 'anxious' && g.attendedBy === null);
     const expression = anim.byteExpression(anxious);
     const talk = clamp01((anim.byte.talkUntil - anim.now()) / 400);
@@ -198,7 +206,17 @@ export function createRenderer(canvas) {
     const O = anim.owner;
     const ownerBehind = O.y < STAGE.behindY + 30;
     const ownerPose = () => buildOwnerPose(state, oClip, anim, time, motion);
-    if (ownerBehind) person(cx, O.x, O.y, 1, OWNER, ownerPose());
+    if (ownerBehind) {
+      // Owner ground shadow
+      cx.save();
+      cx.globalAlpha = 0.15;
+      cx.fillStyle = '#3b2a20';
+      cx.beginPath();
+      cx.ellipse(O.x, O.y + 6, 30, 9, 0, 0, Math.PI * 2);
+      cx.fill();
+      cx.restore();
+      person(cx, O.x, O.y, 1, OWNER, ownerPose());
+    }
 
     // ---- The counter, in front of the owner.
     cx.setTransform(1, 0, 0, 1, 0, 0);
@@ -270,13 +288,33 @@ export function createRenderer(canvas) {
         const y = f.y - 46 * smooth(t);
         const text = f.text ?? '';
         const w = 30 + text.length * 15;
+        // Warm glow behind coin popup
+        cx.save();
+        cx.globalAlpha *= 0.25;
+        const coinGlow = cx.createRadialGradient(f.x, y, 0, f.x, y, w);
+        coinGlow.addColorStop(0, '#ffe08a');
+        coinGlow.addColorStop(1, 'transparent');
+        cx.fillStyle = coinGlow;
+        cx.fillRect(f.x - w, y - w * 0.6, w * 2, w * 1.2);
+        cx.restore();
         art.rounded(cx, f.x - w / 2, y - 24, w, 34, 12, '#29282cee');
+        // Coin with inner highlight
         art.oval(cx, f.x - w / 2 + 16, y - 7, 9, 9, '#f2b532');
+        art.oval(cx, f.x - w / 2 + 15, y - 9, 5, 5, '#ffe87040');
         art.textAt(cx, text, f.x + 8, y + 2, 22, f.color ?? '#ffe08a', 1000);
         cx.globalAlpha = 1;
       } else if (f.type === 'answered' && f.x !== undefined && f.y !== undefined) {
         cx.globalAlpha = 1 - Math.max(0, t - 0.55) / 0.45;
         const y = f.y - 40 * smooth(t);
+        // Success glow ring
+        cx.save();
+        cx.globalAlpha *= 0.3 * (1 - t);
+        cx.strokeStyle = '#7fbf5a';
+        cx.lineWidth = 3;
+        cx.beginPath();
+        cx.arc(f.x, y, 20 + t * 14, 0, Math.PI * 2);
+        cx.stroke();
+        cx.restore();
         art.oval(cx, f.x, y, 20, 20, '#3f9b3a');
         cx.strokeStyle = '#fff';
         cx.lineWidth = 5;
@@ -292,8 +330,17 @@ export function createRenderer(canvas) {
         cx.globalAlpha = 1;
       } else if (f.type === 'cancelled' && f.x !== undefined && f.y !== undefined) {
         cx.globalAlpha = 1 - t;
-        art.oval(cx, f.x, f.y - t * 20, 16 + t * 10, 16 + t * 10, '#5a5062');
-        art.textAt(cx, '×', f.x, f.y + 8 - t * 20, 26, '#fff', 1000);
+        // Fading red ring
+        cx.save();
+        cx.globalAlpha *= 0.35 * (1 - t);
+        cx.strokeStyle = '#df6254';
+        cx.lineWidth = 2;
+        cx.beginPath();
+        cx.arc(f.x, f.y - t * 20, 16 + t * 18, 0, Math.PI * 2);
+        cx.stroke();
+        cx.restore();
+        art.oval(cx, f.x, f.y - t * 20, 16 + t * 10, 16 + t * 10, '#6b3a36');
+        art.textAt(cx, '×', f.x, f.y + 8 - t * 20, 26, '#ffccc6', 1000);
         cx.globalAlpha = 1;
       }
     }
@@ -352,7 +399,11 @@ export function createRenderer(canvas) {
       const badge = badges.get(area.id);
       if (badge) {
         if (badge === '•') {
-          // The owner's current job: a small labelled tag, not a bare dot.
+          // The owner's current job: a warm glowing NOW tag.
+          cx.save();
+          cx.globalAlpha = 0.25;
+          art.oval(cx, area.x + area.w - 31, area.y + area.h - 18, 34, 18, '#ff8d20');
+          cx.restore();
           art.rounded(cx, area.x + area.w - 58, area.y + area.h - 30, 54, 24, 12, '#ff8d20', '#fff', 2);
           art.textAt(cx, 'NOW', area.x + area.w - 31, area.y + area.h - 12, 15, '#fff', 1000);
         } else {
@@ -365,7 +416,9 @@ export function createRenderer(canvas) {
     // ---- An item being dragged follows the pointer, held up slightly.
     if (view.drag) {
       const d = view.drag;
-      art.oval(cx, d.x, d.y + 34, 30, 8, '#00000038');
+      // Softer, larger drop shadow for lifted item
+      art.oval(cx, d.x, d.y + 36, 34, 10, '#00000020');
+      art.oval(cx, d.x, d.y + 34, 28, 7, '#00000030');
       if (d.item === 'latte') {
         cupWithFill(cx, d.x - 4, d.y, 52, 1, true);
         steam(cx, d.x - 4, d.y - 24, time * motion, 1);
@@ -632,6 +685,14 @@ export function createRenderer(canvas) {
       face.mouth = 'neutral';
       face.eyes = blink ? 'closed' : 'down';
     }
+    // Guest ground shadow
+    cx.save();
+    cx.globalAlpha = 0.14;
+    cx.fillStyle = '#3b2a20';
+    cx.beginPath();
+    cx.ellipse(body.x, body.y + 4, 26 * scale, 7 * scale, 0, 0, Math.PI * 2);
+    cx.fill();
+    cx.restore();
     person(cx, body.x, body.y, scale, look, pose);
   }
 

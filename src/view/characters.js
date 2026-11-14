@@ -471,7 +471,10 @@ export function person(cx, x, y, scale, look, pose) {
   cx.translate(x, y + (pose.bob ?? 0));
   cx.scale(s, s);
 
-  if (!pose.hideLegs && !pose.seated) oval(cx, 0, 2, 28, 7, '#3b2a2030');
+  if (!pose.hideLegs && !pose.seated) {
+    oval(cx, 0, 3, 34, 9, '#3b2a2014');
+    oval(cx, 0, 2, 28, 7, '#3b2a2028');
+  }
 
   // Seated figures are drawn from the hips up, raised onto the seat.
   if (pose.seated) cx.translate(0, -HIP_Y - 6);

@@ -401,5 +401,20 @@ export function tag(cx, x, y, r, label, fill = '#30303a') {
 export function bar(cx, x, y, w, h, fraction, color) {
   rounded(cx, x, y, w, h, h / 2, '#3a2c2ccc');
   const inner = Math.max(0, Math.min(1, fraction)) * (w - 4);
-  if (inner > 0) rounded(cx, x + 2, y + 2, inner, h - 4, (h - 4) / 2, color);
+  if (inner > 0) {
+    // Gradient fill for a richer look
+    const grad = cx.createLinearGradient(x + 2, y + 2, x + 2, y + h - 2);
+    grad.addColorStop(0, color);
+    grad.addColorStop(0.5, color);
+    grad.addColorStop(1, color + 'cc');
+    rounded(cx, x + 2, y + 2, inner, h - 4, (h - 4) / 2, grad);
+    // Subtle top highlight
+    cx.save();
+    cx.globalAlpha = 0.2;
+    cx.fillStyle = '#fff';
+    cx.beginPath();
+    cx.roundRect(x + 3, y + 2, Math.max(0, inner - 2), (h - 4) * 0.4, [(h - 4) / 2, (h - 4) / 2, 0, 0]);
+    cx.fill();
+    cx.restore();
+  }
 }
