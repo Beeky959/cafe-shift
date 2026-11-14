@@ -2,7 +2,7 @@
 
 A small browser café-management game featuring Byte. Plain HTML, CSS, JavaScript ES modules and Canvas 2D. No framework, no backend, no runtime dependencies.
 
-**Status: Milestone M2 (playable interface).** One 75-second shift can be played with mouse, touch or keyboard. Poses are static and progress is shown with bars; animation is M3 and the TapIt stand is M4. The plan is in `docs/BUILD_PLAN.md`; results are in `docs/M1_RESULTS.md` and `docs/M2_RESULTS.md`.
+**Status: M2.5 gameplay experiment** (branch `m2.5-order-service-experiment`). Orders are served by hand: pick the ticket, make it at the right station, carry it to the guest. Digital-presence questions look and behave differently from orders, and Byte reacts to what is happening. Built on M2; the simulation is unchanged. See `docs/M2_5_EXPERIMENT.md`.
 
 ## Play it
 
@@ -12,9 +12,11 @@ npm start
 
 Then open http://127.0.0.1:5173/ in a browser.
 
-- **Tap or click** the coffee machine, pastry case, sink, a guest at the counter, or a table. Orange dashed outlines show what can be done right now.
-- **Your list** under the scene shows what you are doing and the next two things. Tap an item to cancel it.
-- **Keys:** `1` machine, `2` pastry case, `3` sink, `4`–`6` counter spots, `7`–`9` tables, `C` cancel, `P` or `Esc` pause. `Tab` moves between the same targets as real buttons.
+- **Serve an order:** press a guest or their numbered ticket, then the coffee machine or pastry case. When it is ready, drag it from the station to the guest, or press the station and then the guest.
+- **Questions** (blue bubble with a phone): press the guest to answer. It takes 2.5 s of your time and they hold the counter spot until you do.
+- **Sink and tables** work as before: press to wash or wipe.
+- **Your list** under the tickets shows what you are doing and the next two things. Press an item to cancel it.
+- **Keys:** `4`–`6` pick or deliver to a counter guest, `1` / `2` make or pick up at the machine or pastry case, `3` sink, `7`–`9` tables, `Esc` puts back what you carry, `C` cancel, `P` pause. `Tab` reaches every target as a labelled button.
 - **On a phone:** run `npm run start:lan` and open the address it prints from a phone on the same Wi-Fi. This makes the game reachable by other devices on that network until you stop it, so use it only on a network you trust.
 
 ## Requirements

@@ -4,7 +4,8 @@
  * it never changes it. Poses are static in this milestone: positions and
  * progress bars are the simulation's own timers, displayed.
  */
-/** @import { SimState, LiveGuest, GuestSpec } from '../sim/types.js' */
+/** @import { SimState, LiveGuest, GuestSpec, OrderItem } from '../sim/types.js' */
+/** @import { Service } from '../ui/service.js' */
 import { resolveTap } from '../sim/index.js';
 import { HIT_AREAS, PLACES, SCENE_HEIGHT, SCENE_WIDTH, centreOf } from './scene.js';
 import * as art from './art.js';
@@ -20,6 +21,11 @@ const MAX_PIXEL_RATIO = 2;
  * @property {string | null} hoverId Hit area under a mouse pointer.
  * @property {Map<string, { kind: 'press' | 'reject', until: number }>} flashes Short highlights, by hit area id.
  * @property {number} now Milliseconds, from the frame clock.
+ * @property {Service} service Order selection and carrying (interface state only).
+ * @property {{ item: OrderItem, x: number, y: number } | null} drag An item being dragged, in scene units.
+ * @property {{ x: number, y: number, text: string, color: string, start: number, until: number }[]} effects Short rising labels.
+ * @property {Map<number, number>} happyUntil Guests showing a pleased face, by id, until this time.
+ * @property {'neutral' | 'happy' | 'alert' | 'sad'} byteMood
  */
 
 /**
@@ -212,21 +218,39 @@ export function createRenderer(canvas) {
     const action = state.owner.action;
     const timing = state.timing;
 
+    const service = view.service;
+    const carrying = service.carrying();
+    const hints = service.hints(state);
+
     // ---- Machine.
     const slot = state.machine.slots[0];
     if (slot.state === 'brewing') {
       art.bar(cx, 70, 150, 120, 18, 1 - slot.ticksLeft / timing.brew, '#bee86f');
       art.cup(cx, 130, 238, 26);
+      const forWhom = service.madeFor('latte');
+      if (forWhom !== null) art.tag(cx, 176, 238, 15, forWhom);
     } else if (slot.state === 'ready') {
-      art.rounded(cx, 60, 146, 140, 26, 13, '#bee86f', '#3a2c2c', 3);
-      art.textAt(cx, 'READY', 130, 166, 18, '#2c3a12', 1000);
-      art.cup(cx, 130, 236, 34, true);
+      const lifted = carrying === 'latte';
+      art.rounded(cx, 60, 146, 140, 26, 13, lifted ? '#ffb03a' : '#bee86f', '#3a2c2c', 3);
+      art.textAt(cx, lifted ? 'IN HAND' : 'READY', 130, 166, 18, '#2c3a12', 1000);
+      if (!(view.drag && view.drag.item === 'latte')) {
+        art.cup(cx, 130, lifted ? 222 : 236, 34, true);
+        const forWhom = service.madeFor('latte');
+        if (forWhom !== null) art.tag(cx, 178, lifted ? 222 : 236, 15, forWhom);
+      }
     }
 
-    // ---- Pastry pass: a plated croissant waits on the counter beside the case.
-    if (state.pass.dishId !== null) {
-      art.plate(cx, 448, 342, 64, false);
-      art.croissant(cx, 448, 334, 40);
+    // ---- Pastry pass: a plated croissant waits in front of the case.
+    if (state.pass.dishId !== null && !(view.drag && view.drag.item === 'croissant')) {
+      const lifted = carrying === 'croissant';
+      art.plate(cx, 340, lifted ? 290 : 302, 64, false);
+      art.croissant(cx, 340, lifted ? 282 : 294, 40);
+      const forWhom = service.madeFor('croissant');
+      if (forWhom !== null) art.tag(cx, 392, lifted ? 286 : 298, 15, forWhom);
+      if (lifted) {
+        art.rounded(cx, 280, 150, 120, 26, 13, '#ffb03a', '#3a2c2c', 3);
+        art.textAt(cx, 'IN HAND', 340, 170, 18, '#2c3a12', 1000);
+      }
     }
 
     // ---- Dishes: clean ones on the shelf, dirty ones in the sink.
@@ -277,7 +301,16 @@ export function createRenderer(canvas) {
       const patienceMax = g.state === 'asking' ? timing.askingPatience : timing.counterPatience;
       const fraction = g.patienceLeft / patienceMax;
       const waiting = g.state === 'waiting' || g.state === 'walkingIn' || g.state === 'asking';
-      art.guest(cx, pos.x, pos.y, spec.look, pos.scale, waiting && fraction < 0.25 ? 'worried' : 'neutral');
+      const pleased = (view.happyUntil.get(g.id) ?? 0) > view.now;
+      art.guest(cx, pos.x, pos.y, spec.look, pos.scale, pleased ? 'happy' : waiting && fraction < 0.25 ? 'worried' : 'neutral');
+      const isSelected = service.selected() === g.id;
+      if (isSelected) {
+        cx.strokeStyle = '#ff8d20';
+        cx.lineWidth = 6;
+        cx.beginPath();
+        cx.ellipse(pos.x, pos.y + 39 * pos.scale, 34 * pos.scale, 11 * pos.scale, 0, 0, Math.PI * 2);
+        cx.stroke();
+      }
 
       if (g.dishId !== null && !waiting) {
         // Served: their order sits in front of them.
@@ -287,22 +320,37 @@ export function createRenderer(canvas) {
       }
       if (!waiting) continue;
 
-      // Bubble with what they want, and a patience bar under it.
+      // What they want, and a patience bar under it. An order is a cream
+      // ticket with the item on it; a question is a blue speech bubble with
+      // a phone, so the two can never be mistaken for each other.
       const big = g.place.kind === 'spot';
-      const bw = big ? 84 : 56;
+      const asking = g.state === 'asking';
+      const bw = big ? (asking ? 104 : 84) : 56;
       const bh = big ? 58 : 40;
       const bx = pos.x - bw / 2;
       const by = pos.y - 60 * pos.scale - bh + (big ? 46 : 30);
-      const asking = g.state === 'asking';
-      art.rounded(cx, bx, by, bw, bh, 12, asking ? '#fff2c2' : '#fff9e9', g.attendedBy !== null ? '#ff8d20' : '#6d4b42', g.attendedBy !== null ? 5 : 3);
+      const attended = g.attendedBy !== null;
       if (asking && spec.question) {
-        art.textAt(cx, '?', bx + bw * 0.26, by + bh * 0.72, bh * 0.7, '#d9534f', 1000);
-        art.topicIcon(cx, spec.question.topic, bx + bw * 0.66, by + bh * 0.5, bh * 0.62);
+        // The spot they are holding is marked on the floor.
+        cx.setLineDash([10, 8]);
+        cx.strokeStyle = '#2f6fb0';
+        cx.lineWidth = 5;
+        cx.beginPath();
+        cx.ellipse(pos.x, pos.y + 39 * pos.scale, 40 * pos.scale, 13 * pos.scale, 0, 0, Math.PI * 2);
+        cx.stroke();
+        cx.setLineDash([]);
+        art.rounded(cx, bx, by, bw, bh, 22, '#dff0ff', attended ? '#ff8d20' : '#2f6fb0', attended ? 6 : 4);
+        art.poly(cx, [[pos.x - 10, by + bh - 2], [pos.x + 10, by + bh - 2], [pos.x, by + bh + 12]], '#dff0ff');
+        art.phone(cx, bx + bw * 0.2, by + bh * 0.5, bh * 0.72);
+        art.textAt(cx, '?', bx + bw * 0.47, by + bh * 0.74, bh * 0.72, '#2f6fb0', 1000);
+        art.topicIcon(cx, spec.question.topic, bx + bw * 0.76, by + bh * 0.5, bh * 0.56);
       } else {
-        orderIcon(spec, bx + bw / 2, by + bh / 2 + 2, bh * 0.56);
+        art.rounded(cx, bx, by, bw, bh, 8, '#fff9e9', attended || isSelected ? '#ff8d20' : '#6d4b42', attended || isSelected ? 6 : 3);
+        orderIcon(spec, bx + bw / 2 + (big ? 8 : 0), by + bh / 2 + 2, bh * 0.56);
       }
-      const color = fraction < 0.25 ? '#df6254' : fraction < 0.5 ? '#e7b84a' : '#a8d46f';
-      art.bar(cx, bx, by + bh + 3, bw, big ? 14 : 10, fraction, color);
+      art.tag(cx, bx + (big ? 4 : 2), by + 4, big ? 17 : 13, g.id, asking ? '#2f6fb0' : '#30303a');
+      const color = fraction < 0.25 ? '#df6254' : fraction < 0.5 ? '#e7b84a' : asking ? '#6fb3ee' : '#a8d46f';
+      art.bar(cx, bx, by + bh + (asking ? 14 : 3), bw, big ? 14 : 10, fraction, color);
     }
 
     // ---- Owner.
@@ -328,11 +376,13 @@ export function createRenderer(canvas) {
     art.owner(cx, ox, oy, 1.25);
     if (action && action.phase === 'working') {
       const total = action.kind === 'wash' ? timing.washPerDish : timing[action.kind];
-      art.bar(cx, ox - 46, oy - 158, 92, 16, 1 - action.ticksLeft / total, '#ffb03a');
+      // Answering a question is drawn in the questions' blue, not the orange of café work.
+      art.bar(cx, ox - 46, oy - 158, 92, 16, 1 - action.ticksLeft / total, action.kind === 'answer' ? '#6fb3ee' : '#ffb03a');
+      if (action.kind === 'answer') art.phone(cx, ox + 62, oy - 150, 30);
     }
 
     // ---- Byte.
-    art.byte(cx, PLACES.byte.x, PLACES.byte.y, 0.7);
+    art.byte(cx, PLACES.byte.x, PLACES.byte.y, 0.7, view.byteMood);
 
     // ---- Target outlines: what can be done now, what is queued, and feedback.
     /** @type {Map<string, string>} */
@@ -352,8 +402,20 @@ export function createRenderer(canvas) {
     if (action) badgeFor({ kind: action.kind, guestId: action.claims.guestId, tableId: action.claims.tableId }, '•');
     state.owner.queue.forEach((q, i) => badgeFor(q, String(i + 1)));
 
+    const playing = state.phase !== 'ended';
     for (const area of HIT_AREAS) {
-      const live = state.phase !== 'ended' && resolveTap(state, area.target).ok;
+      const t = area.target;
+      // What pressing here would do next, if anything.
+      /** @type {'none' | 'do' | 'pick' | 'drop'} */
+      let cue = 'none';
+      if (playing && (t.kind === 'machine' || t.kind === 'case')) {
+        if (hints.pickUp.includes(t.kind)) cue = 'pick';
+        else if (hints.stations.includes(t.kind)) cue = 'do';
+      } else if (playing && t.kind === 'spot') {
+        if (hints.spots.includes(t.index)) cue = carrying || view.drag ? 'drop' : 'do';
+      } else if (playing && !carrying && resolveTap(state, t).ok) {
+        cue = 'do';
+      }
       const flash = view.flashes.get(area.id);
       const flashing = flash && flash.until > view.now ? flash.kind : null;
       const hover = view.hoverId === area.id;
@@ -361,7 +423,9 @@ export function createRenderer(canvas) {
         art.rounded(cx, area.x, area.y, area.w, area.h, 18, '#d9534f22', '#d9534f', 6);
       } else if (flashing === 'press') {
         art.rounded(cx, area.x, area.y, area.w, area.h, 18, '#ffffff40', '#ff8d20', 6);
-      } else if (live) {
+      } else if (cue === 'drop' || cue === 'pick') {
+        art.rounded(cx, area.x + 3, area.y + 3, area.w - 6, area.h - 6, 18, hover ? '#7fd36a40' : '#7fd36a22', '#3f9b3a', 6);
+      } else if (cue === 'do') {
         cx.setLineDash(hover ? [] : [14, 10]);
         art.rounded(cx, area.x + 3, area.y + 3, area.w - 6, area.h - 6, 18, hover ? '#ffffff26' : '#ffffff00', '#ff8d20', hover ? 5 : 4);
         cx.setLineDash([]);
@@ -370,9 +434,31 @@ export function createRenderer(canvas) {
       }
       const badge = badges.get(area.id);
       if (badge) {
-        art.oval(cx, area.x + area.w - 18, area.y + 18, 17, 17, badge === '•' ? '#ff8d20' : '#30303a');
-        art.textAt(cx, badge, area.x + area.w - 18, area.y + 27, 24, '#fff', 1000);
+        art.oval(cx, area.x + area.w - 18, area.y + area.h - 18, 17, 17, badge === '•' ? '#ff8d20' : '#30303a');
+        art.textAt(cx, badge, area.x + area.w - 18, area.y + area.h - 9, 24, '#fff', 1000);
       }
+    }
+
+    // ---- An item being dragged follows the pointer.
+    if (view.drag) {
+      art.oval(cx, view.drag.x, view.drag.y + 26, 30, 9, '#00000030');
+      if (view.drag.item === 'latte') art.cup(cx, view.drag.x - 4, view.drag.y, 52, true);
+      else {
+        art.plate(cx, view.drag.x, view.drag.y + 8, 76, false);
+        art.croissant(cx, view.drag.x, view.drag.y, 50);
+      }
+    }
+
+    // ---- Short rising labels: a payment, a tip, a guest lost.
+    for (const fx of view.effects) {
+      if (fx.until <= view.now) continue;
+      const t = (view.now - fx.start) / (fx.until - fx.start);
+      cx.globalAlpha = 1 - Math.max(0, t - 0.6) / 0.4;
+      const y = fx.y - 40 * t;
+      const w = 28 + fx.text.length * 17;
+      art.rounded(cx, fx.x - w / 2, y - 26, w, 36, 12, '#29282cee');
+      art.textAt(cx, fx.text, fx.x, y, 26, fx.color, 1000);
+      cx.globalAlpha = 1;
     }
   }
 

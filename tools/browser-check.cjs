@@ -1,6 +1,7 @@
 /**
  * Browser check: loads the game from the local static server in a headless
- * browser and plays it with real mouse, touch and keyboard input at desktop
+ * browser and serves orders by hand with real mouse, touch and keyboard input,
+ * including a real drag, at desktop
  * size, at 360x640 and on a phone held sideways. Fails on any console error,
  * uncaught exception, failed or non-local request, page scroll, undersized
  * touch target, or a result that differs from the same commands replayed in
@@ -107,75 +108,112 @@ async function main() {
       if (vp.width === 360) check(Math.round(layout.canvas.w) === 360, `scene is ${layout.canvas.w} px wide, expected 360`);
       check(layout.targets.length === scene.HIT_AREAS.length, `${layout.targets.length} target buttons`);
       for (const t of layout.targets) check(t.w >= 48 && t.h >= 48, `${t.id} is ${Math.round(t.w)}x${Math.round(t.h)} px, under 48`);
-      for (const c of layout.chips) check(c.h >= 36 && c.r <= layout.inner[0] + 0.5, 'an action chip is too small or off screen');
+      for (const c of layout.chips) check(c.h >= 40 && c.r <= layout.inner[0] + 0.5, `an action chip is ${Math.round(c.h)} px tall or off screen`);
+      const railCards = await page.evaluate(() => [...document.querySelectorAll('.card')].map((el) => { const b = el.getBoundingClientRect(); return { w: b.width, h: b.height, r: b.right, b: b.bottom }; }));
+      check(railCards.length === 5, `${railCards.length} rail cards`);
+      for (const c of railCards) check(c.w >= 44 && c.h >= 44 && c.r <= layout.inner[0] + 0.5 && c.b <= layout.inner[1] + 0.5, `a rail card is ${Math.round(c.w)}x${Math.round(c.h)} px or off screen`);
       for (const h of layout.hud) check(h.l >= 0 && h.r <= layout.inner[0] + 0.5, 'a HUD item is cut off');
       check(layout.caption.b <= layout.inner[1] + 0.5, "Byte's caption is off screen");
 
-      // ---- C. Play with real input.
+      // ---- C. Serve by hand with real input: pick the order, make it, carry it over.
+      const cdp = vp.touch ? await context.newCDPSession(page) : null;
+      const toScreen = async (id) => {
+        const box = await page.locator('#scene').boundingBox();
+        const c = scene.centreOf(scene.HIT_AREAS.find((a) => a.id === id));
+        return { x: box.x + (c.x / scene.SCENE_WIDTH) * box.width, y: box.y + (c.y / scene.SCENE_HEIGHT) * box.height };
+      };
+      /** A real drag from one target to another: mouse on desktop, a finger on touch. */
+      const drag = async (fromId, toId) => {
+        const from = await toScreen(fromId);
+        const to = await toScreen(toId);
+        const steps = 10;
+        const at = (i) => ({ x: from.x + ((to.x - from.x) * i) / steps, y: from.y + ((to.y - from.y) * i) / steps });
+        if (cdp) {
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [from] });
+          for (let i = 1; i <= steps; i++) {
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [at(i)] });
+            await page.waitForTimeout(16);
+          }
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        } else {
+          await page.mouse.move(from.x, from.y);
+          await page.mouse.down();
+          for (let i = 1; i <= steps; i++) {
+            await page.mouse.move(at(i).x, at(i).y);
+            await page.waitForTimeout(16);
+          }
+          await page.mouse.up();
+        }
+      };
+      const cardData = (slot, key) => page.getAttribute(`#card-${slot}`, `data-${key}`);
+      /** The first guest waiting at the counter with nothing made for them: { id, slot, order, station }. */
+      const nextOrder = () =>
+        page.evaluate(() => {
+          const s = window.cafeShift.state();
+          for (const [slot, id] of s.spots.entries()) {
+            const g = s.guests.find((x) => x.id === id);
+            const spec = s.schedule.find((x) => x.id === id);
+            if (g && spec && g.state === 'waiting' && g.attendedBy === null) return { id, slot, order: spec.order, station: spec.order === 'latte' ? 'machine' : 'case' };
+          }
+          return null;
+        });
+      const itemReadyExpr = (order) => (order === 'latte' ? "s.machine.slots[0].state === 'ready'" : 's.pass.dishId !== null');
+
       await activate('#overlay-button');
       check((await phase()) === 'playing', 'did not start');
       check(!(await page.isVisible('#overlay')), 'overlay still shown while playing');
       await until("s.guests.some((x) => x.state === 'waiting')", 'first guest at the counter');
 
-      // No input is lost: with the clock held still, 100 presses on valid
-      // targets become exactly 100 commands. (The prototype dropped taps.)
+      // A station does nothing until an order is picked, and says so. No command is sent.
+      await pressArea('machine');
+      await page.waitForTimeout(150);
+      check((await page.textContent('#byte-text')).includes('Pick an order first'), 'no explanation for pressing a station with no order picked');
+      check((await game('g.commandLog().length')) === 0 && (await game('g.pendingCount()')) === 0, 'a refused press still sent a command');
+
+      // No input is lost: with the clock held still, 100 presses are all handled.
+      // (The prototype dropped taps.) Presses alternate between two targets and are
+      // spaced so that the intended 80 ms same-target debounce does not apply.
       await page.evaluate(() => window.cafeShift.setSpeed(0));
       await page.waitForTimeout(60);
-      const heldAt = await game('g.pendingCount()');
-      // Presses alternate between two targets and are spaced so that the 80 ms
-      // same-target debounce, which is intended, does not apply.
+      const handledBefore = await game('g.inputCount()');
       for (let i = 0; i < 100; i++) {
-        await pressArea(i % 2 === 0 ? 'machine' : 'case');
+        await pressArea(i % 2 === 0 ? 'spot-0' : 'table-1');
         await page.waitForTimeout(55);
       }
-      const accepted = (await game('g.pendingCount()')) - heldAt;
-      check(accepted === 100, `100 presses produced ${accepted} commands`);
+      const handled = (await game('g.inputCount()')) - handledBefore;
+      check(handled === 100, `100 presses, ${handled} handled`);
+      check((await game('g.pendingCount()')) === 0, 'selecting an order or pressing a clean table sent a command');
       await page.evaluate(() => window.cafeShift.setSpeed(1));
-      // Only the first of each is acted on; the rest are refused as duplicates. Clear them.
-      await until("s.owner.action !== null", 'the held presses to be applied');
-      for (let i = 0; i < 3; i++) {
-        await page.evaluate(() => { const s = window.cafeShift.state(); if (s.owner.action || s.owner.queue.length) document.getElementById(s.owner.queue.length ? 'chip-1' : 'chip-0').click(); });
-        await page.waitForTimeout(120);
-      }
-      await until("s.owner.action === null && s.owner.queue.length === 0", 'the task list to be cleared');
-      check((await game("s.dishes.filter((d) => d.holder.kind === 'rack').length")) === 5, 'clearing the task list did not return the dishes');
 
-      // A tap that can do nothing sends no command and says why.
-      const logBefore = await game('g.commandLog().length');
-      await pressArea('sink');
-      await page.waitForTimeout(150);
-      check((await page.textContent('#byte-text')).includes('Nothing to wash'), 'no explanation for a refused tap');
-      check((await game('g.commandLog().length')) === logBefore, 'a refused tap still sent a command');
+      // 1. Pick the order: press the guest in the scene.
+      const first = await nextOrder();
+      check(first !== null, 'no order to pick');
+      await pressArea(`spot-${first.slot}`);
+      check((await game('g.selected()')) === first.id, 'pressing a guest did not select their ticket');
+      check((await cardData(first.slot, 'selected')) === 'yes', 'the selected ticket is not marked on the rail');
+      check((await page.textContent(`#card-${first.slot} .card-num`)) === String(first.id), 'the ticket number is not the guest number');
 
-      // Pointer: start a latte. A near miss, 10 scene units outside the machine, still counts.
-      const machine = scene.HIT_AREAS.find((a) => a.id === 'machine');
-      await pressScene(machine.x - 10, machine.y + machine.h / 2);
-      await until("s.owner.action && s.owner.action.kind === 'brewStart' || s.machine.slots[0].state !== 'empty'", 'near-miss tap on the machine');
+      // 2. Make it at the right station (a near miss, 10 scene units outside, still counts).
+      const station = scene.HIT_AREAS.find((a) => a.id === first.station);
+      await pressScene(station.x - 10, station.y + station.h / 2);
+      await until("s.owner.action !== null || s.machine.slots[0].state !== 'empty' || s.pass.dishId !== null", 'the order to be started');
 
-      // Cancel through the action strip while it is still in progress, if we were quick enough.
-      const cancelled = await game("s.owner.action && s.owner.action.kind === 'brewStart'");
-      if (cancelled) {
-        await activate('#chip-0');
-        await until('s.owner.action === null', 'cancel from the action strip');
+      // Cancelling returns everything; then start it again for real.
+      if (await game("s.owner.action !== null && (s.owner.action.kind === 'brewStart' || s.owner.action.kind === 'plate')")) {
+        if (vp.touch) await activate('#chip-0');
+        else await page.keyboard.press('c');
+        await until('s.owner.action === null', 'cancel');
         check((await game("s.dishes.filter((d) => d.holder.kind === 'rack').length")) === 5, 'cancel did not return the dish');
-        check((await game("s.machine.slots[0].state")) === 'empty', 'cancel left the machine busy');
-      }
-
-      // Keyboard on desktop, pointer elsewhere: brew for real this time.
-      if (!vp.touch) {
-        // C cancels the current action.
-        await page.keyboard.press('2');
-        await until("s.owner.action && s.owner.action.kind === 'plate'", 'key 2 starts plating');
-        await page.keyboard.press('c');
-        await until('s.owner.action === null', 'key C cancels');
-        check((await game('s.pass.dishId')) === null, 'cancelled plating still produced a croissant');
-        await page.keyboard.press('1');
-        await until("s.machine.slots[0].state !== 'empty' || (s.owner.action && s.owner.action.kind === 'brewStart')", 'key 1 starts a latte');
-      } else {
+        check((await cardData(first.slot, 'status')) === 'new', 'a cancelled order is not shown as new again');
+        // Past the 80 ms same-target debounce: the check can press faster than a person.
         await page.waitForTimeout(120);
-        await pressArea('machine');
+        await pressArea(`spot-${first.slot}`);
+        await page.waitForTimeout(120);
+        await pressArea(first.station);
       }
-      await until("s.machine.slots[0].state === 'ready'", 'latte ready');
+      await until(itemReadyExpr(first.order), 'the item to be ready');
+      await page.waitForTimeout(250);
+      check((await cardData(first.slot, 'status')) === 'ready', `ticket shows "${await cardData(first.slot, 'status')}" when its item is ready`);
 
       // Pause freezes the shift.
       if (!vp.touch) await page.keyboard.press('p');
@@ -189,22 +227,64 @@ async function main() {
       await activate('#overlay-button');
       check((await phase()) === 'playing', 'did not resume');
 
-      // Serve the first latte guest: a real button on desktop (focus, then Enter), a tap on touch.
-      const spotIndex = await game("s.spots.findIndex((id) => { const x = s.guests.find((q) => q.id === id); const sp = s.schedule.find((q) => q.id === id); return x && sp && x.state === 'waiting' && sp.order === 'latte'; })");
-      check(spotIndex >= 0, 'no latte guest is waiting');
-      const coinsBefore = await game('s.economy.wallet');
-      if (!vp.touch) {
-        await page.focus(`#target-spot-${spotIndex}`);
-        await page.waitForTimeout(250);
-        check((await page.getAttribute(`#target-spot-${spotIndex}`, 'aria-label')).includes('Press to hand over'), 'target button is not labelled with its action');
-        await page.keyboard.press('Enter');
-      } else {
-        await pressArea(`spot-${spotIndex}`);
-      }
-      await until(`s.economy.wallet > ${coinsBefore}`, 'payment after hand-over');
+      // 3. Deliver by dragging the item from the station to the guest.
+      await drag(first.station, `spot-${first.slot}`);
+      await until('s.economy.wallet > 0', 'payment after a dragged delivery');
       check((await page.textContent('#hud-coins')) === String(await game('s.economy.wallet')), 'HUD coins differ from the state');
-      check((await page.textContent('#chip-0')) !== '', 'action strip is empty');
-      if (shots) await page.screenshot({ path: path.join(shots, `${vp.name}-3-playing.png`) });
+      check((await page.textContent(`#card-${first.slot} .card-receipt`)).startsWith('Paid +'), 'the completed transaction is not shown on the ticket');
+      check((await game('g.carrying()')) === null && (await game('g.selected()')) === null, 'interface state was not cleared after delivery');
+      if (shots) await page.screenshot({ path: path.join(shots, `${vp.name}-3-delivered.png`) });
+
+      // 4. A question is a different thing from an order, and costs counter time.
+      if (await game(`s.guests.some((x) => x.id === ${first.id} && x.state === 'asking')`)) {
+        check((await cardData(first.slot, 'kind')) === 'question', 'a question is shown as an order');
+        check((await page.getAttribute(`#card-${first.slot}`, 'aria-label')).includes('a question, not an order'), 'the question card does not say it is a question');
+        check((await page.textContent('#byte-text')).includes('question'), 'Byte did not react to the question');
+        check((await page.textContent('#hud-questions')) === '0s', 'questions time did not start at zero');
+        // Answer it: the rail card on touch, the spot's number key on desktop.
+        if (vp.touch) await activate(`#card-${first.slot}`);
+        else await page.keyboard.press(String(4 + first.slot));
+        await until('s.metrics.ownerTicks.answer >= s.timing.answer', 'the question to be answered');
+        await page.waitForTimeout(100);
+        check((await page.textContent('#hud-questions')) === '3s', `questions time shows ${await page.textContent('#hud-questions')}`);
+      } else {
+        fail('the first guest of the default shift should have asked a question');
+      }
+
+      // 5. The accessible equivalent, with no dragging: pick, make, pick up, deliver.
+      await until("s.spots.some((id) => { const x = s.guests.find((q) => q.id === id); return x && x.state === 'waiting' && x.attendedBy === null; })", 'a second order');
+      const second = await nextOrder();
+      const stationKey = second.station === 'machine' ? '1' : '2';
+      const served = await game('s.metrics.guests.served');
+      if (!vp.touch) {
+        await page.keyboard.press(String(4 + second.slot)); // pick the order
+        check((await game('g.selected()')) === second.id, 'the number key did not select the ticket');
+        await page.keyboard.press(stationKey); // make it
+        await until(itemReadyExpr(second.order), 'the second item');
+        await page.focus(`#target-${second.station}`); // a real, labelled button
+        await page.waitForTimeout(250);
+        check((await page.getAttribute(`#target-${second.station}`, 'aria-label')).includes('Press to pick up'), 'the station button is not labelled with picking up');
+        await page.keyboard.press('Enter');
+        check((await game('g.carrying()')) === second.order, 'Enter on the station did not pick the item up');
+        await page.keyboard.press('Escape'); // put it back, without pausing
+        check((await game('g.carrying()')) === null && (await phase()) === 'playing', 'Escape did not put the item back');
+        await page.waitForTimeout(120); // past the same-target debounce
+        await page.keyboard.press(stationKey);
+        check((await game('g.carrying()')) === second.order, 'the station key did not pick the item up');
+        await page.keyboard.press(String(4 + second.slot)); // deliver
+      } else {
+        await activate(`#card-${second.slot}`); // pick the order on the rail
+        check((await game('g.selected()')) === second.id, 'the rail card did not select the ticket');
+        await pressArea(second.station);
+        await until(itemReadyExpr(second.order), 'the second item');
+        await pressArea(second.station); // tap to pick up
+        check((await game('g.carrying()')) === second.order, 'a tap on the station did not pick the item up');
+        await page.waitForTimeout(60);
+        check((await page.getAttribute('#app', 'data-carrying')) === second.order, 'the page does not show an item is being carried');
+        await pressArea(`spot-${second.slot}`); // tap the guest to deliver
+      }
+      await until(`s.metrics.guests.served > ${served}`, 'the second delivery');
+      if (shots) await page.screenshot({ path: path.join(shots, `${vp.name}-4-second.png`) });
 
       // ---- D. Let the scripted player finish the shift, quickly.
       await page.evaluate(async () => {
@@ -230,7 +310,8 @@ async function main() {
       check(final.text.includes(`${final.happy} of ${final.guests} guests left happy`), 'results do not match the state (guests)');
       check(final.text.includes(`${final.gross} coins earned`) && final.text.includes(`Score: ${final.score}`), 'results do not match the state (coins)');
       check(final.time === 'Closed', 'clock does not show the shift is over');
-      if (shots) await page.screenshot({ path: path.join(shots, `${vp.name}-4-results.png`) });
+      check(final.text.includes('question'), 'results do not report the time spent on questions');
+      if (shots) await page.screenshot({ path: path.join(shots, `${vp.name}-5-results.png`) });
 
       // ---- E. The session is reproducible: the same commands replayed in Node give the same state.
       const replayed = sim.replay({}, final.log);

@@ -105,13 +105,16 @@ export function plant(cx, x, y, scale = 1) {
 }
 
 /**
- * Byte, as in the prototype, standing still.
+ * Byte, as in the prototype, standing still. The mood changes only the eyes
+ * and the antenna light.
  * @param {Ctx} cx
  * @param {number} x
  * @param {number} y
  * @param {number} [scale]
+ * @param {'neutral' | 'happy' | 'alert' | 'sad'} [mood]
  */
-export function byte(cx, x, y, scale = 1) {
+export function byte(cx, x, y, scale = 1, mood = 'neutral') {
+  const glow = mood === 'alert' ? '#ffb03a' : mood === 'sad' ? '#8fb6d6' : '#bbfc58';
   cx.save();
   cx.translate(x, y);
   cx.scale(scale, scale);
@@ -129,15 +132,33 @@ export function byte(cx, x, y, scale = 1) {
   cx.stroke();
   rounded(cx, -36, -59, 72, 65, 27, '#eef1ed', '#282c38', 5);
   rounded(cx, -28, -45, 57, 39, 17, '#232d36');
-  oval(cx, -12, -27, 6, 8, '#bbfc58');
-  oval(cx, 13, -27, 6, 8, '#bbfc58');
+  if (mood === 'happy') {
+    cx.strokeStyle = glow;
+    cx.lineWidth = 4;
+    cx.lineCap = 'round';
+    for (const ex of [-12, 13]) {
+      cx.beginPath();
+      cx.arc(ex, -24, 6, Math.PI, 0);
+      cx.stroke();
+    }
+    cx.lineCap = 'butt';
+  } else if (mood === 'alert') {
+    oval(cx, -12, -27, 7, 10, glow);
+    oval(cx, 13, -27, 7, 10, glow);
+  } else if (mood === 'sad') {
+    oval(cx, -12, -24, 6, 5, glow);
+    oval(cx, 13, -24, 6, 5, glow);
+  } else {
+    oval(cx, -12, -27, 6, 8, glow);
+    oval(cx, 13, -27, 6, 8, glow);
+  }
   cx.strokeStyle = '#77858b';
   cx.lineWidth = 4;
   cx.beginPath();
   cx.moveTo(0, -59);
   cx.lineTo(0, -74);
   cx.stroke();
-  oval(cx, 0, -77, 7, 7, '#bdff4d');
+  oval(cx, 0, -77, 7, 7, glow);
   cx.restore();
 }
 
@@ -151,7 +172,7 @@ const SHIRTS = ['#698c88', '#b06f76', '#7d79b5', '#d9a34e', '#7ea273', '#e38e6f'
  * @param {number} y Feet are about 39 * scale below this.
  * @param {number} look
  * @param {number} [scale]
- * @param {'neutral' | 'worried'} [mood]
+ * @param {'neutral' | 'worried' | 'happy'} [mood]
  */
 export function guest(cx, x, y, look, scale = 1, mood = 'neutral') {
   const skin = SKINS[(look * 7) % SKINS.length];
@@ -171,8 +192,13 @@ export function guest(cx, x, y, look, scale = 1, mood = 'neutral') {
   cx.lineWidth = 2;
   cx.beginPath();
   if (mood === 'worried') cx.arc(0, -4, 5, Math.PI + 0.3, -0.3);
+  else if (mood === 'happy') cx.arc(0, -11, 8, 0.1, Math.PI - 0.1);
   else cx.arc(0, -9, 5, 0.1, Math.PI - 0.1);
   cx.stroke();
+  if (mood === 'happy') {
+    oval(cx, -12, -11, 4, 2.5, '#e9806e88');
+    oval(cx, 12, -11, 4, 2.5, '#e9806e88');
+  }
   cx.restore();
 }
 
@@ -329,6 +355,38 @@ export function topicIcon(cx, topic, x, y, s) {
       textAt(cx, 'WC', x, y + s * 0.25, s * 0.7, ink, 1000);
   }
   cx.lineCap = 'butt';
+}
+
+/**
+ * A phone, held up: the sign of a question about the café online.
+ * @param {Ctx} cx
+ * @param {number} x
+ * @param {number} y
+ * @param {number} s
+ */
+export function phone(cx, x, y, s) {
+  rounded(cx, x - s * 0.28, y - s * 0.5, s * 0.56, s, s * 0.12, '#24303c', '#12181f', Math.max(2, s * 0.06));
+  rounded(cx, x - s * 0.2, y - s * 0.38, s * 0.4, s * 0.66, s * 0.05, '#9fd6ff');
+  oval(cx, x, y + s * 0.39, s * 0.05, s * 0.05, '#9fd6ff');
+}
+
+/**
+ * A small numbered tag, matching a ticket.
+ * @param {Ctx} cx
+ * @param {number} x
+ * @param {number} y
+ * @param {number} r
+ * @param {number | string} label
+ * @param {string} [fill]
+ */
+export function tag(cx, x, y, r, label, fill = '#30303a') {
+  oval(cx, x, y, r, r, fill);
+  cx.strokeStyle = '#fff';
+  cx.lineWidth = 3;
+  cx.beginPath();
+  cx.arc(x, y, r, 0, Math.PI * 2);
+  cx.stroke();
+  textAt(cx, String(label), x, y + r * 0.38, r * 1.15, '#fff', 1000);
 }
 
 /**

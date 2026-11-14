@@ -42,25 +42,52 @@ function start() {
   renderer.resize();
   new ResizeObserver(() => renderer.resize()).observe(canvas);
 
-  // Pointer: decided on pointerdown, from the primary pointer only.
+  // Pointer: decided on pointerdown, from the primary pointer only. A press
+  // on a station holding a finished item picks it up; it then follows the
+  // pointer until it is released over a guest.
+  /** @type {number | null} */
+  let dragPointer = null;
   canvas.addEventListener('pointerdown', (event) => {
     if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
     event.preventDefault();
     const point = renderer.toScene(event.clientX, event.clientY);
     const area = hitTest(point.x, point.y);
-    if (area) game.press(area);
+    if (!area) return;
+    if (game.dragStart(area, point)) {
+      dragPointer = event.pointerId;
+      canvas.setPointerCapture(event.pointerId);
+      return;
+    }
+    game.press(area);
   });
   canvas.addEventListener('pointermove', (event) => {
-    if (event.pointerType !== 'mouse') return;
     const point = renderer.toScene(event.clientX, event.clientY);
-    game.setHover(hitTest(point.x, point.y)?.id ?? null);
+    if (event.pointerId === dragPointer) game.dragMove(point);
+    if (event.pointerType === 'mouse') game.setHover(hitTest(point.x, point.y)?.id ?? null);
   });
+  /** @param {PointerEvent} event @param {boolean} cancelled */
+  const endDrag = (event, cancelled) => {
+    if (event.pointerId !== dragPointer) return;
+    dragPointer = null;
+    if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    const point = renderer.toScene(event.clientX, event.clientY);
+    game.dragEnd(hitTest(point.x, point.y), cancelled);
+  };
+  canvas.addEventListener('pointerup', (event) => endDrag(event, false));
+  canvas.addEventListener('pointercancel', (event) => endDrag(event, true));
   canvas.addEventListener('pointerleave', () => game.setHover(null));
 
   // Keyboard: number keys for targets, C to cancel, P or Escape to pause.
+  // The same keys carry out an order: 4-6 picks a guest's ticket, 1 or 2
+  // makes it, 1 or 2 again picks it up when ready, 4-6 delivers it.
   window.addEventListener('keydown', (event) => {
     if (event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
     const key = event.key;
+    if (key === 'Escape' && game.putBack()) {
+      // Escape first puts back whatever is being carried.
+      event.preventDefault();
+      return;
+    }
     if (key === 'Escape' || key === 'p' || key === 'P') {
       if (game.phase() === 'playing' || game.phase() === 'paused') {
         event.preventDefault();

@@ -27,6 +27,9 @@ This is the smallest thing that can answer all four questions in the brief: is i
 - **Depends on:** M1.
 - **Gate:** Shift 2 is completable by tapping on a phone; 100 scripted taps on valid targets produce 100 commands; no scrolling at 360×640; the layout data passes the 360 px rules in TECH_BLUEPRINT.md §6 (48 px minimum, 8 px gaps, no overlaps, near-miss and tie-break behaviour).
 
+### M2.5 — Gameplay experiment: order service by hand
+- **Status:** built on a separate branch, awaiting playtest. See `docs/M2_5_EXPERIMENT.md`. M3 waits for its result.
+
 ### M3 — Animation for the core tasks
 - **Build:** clip selection, tweens, effects; brewing, serving, wiping, washing, customer reactions, Byte expressions.
 - **Depends on:** M2.

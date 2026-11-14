@@ -1,12 +1,11 @@
 // @ts-check
 /**
- * Words on screen and Byte's lines. Both are pure functions of the
- * simulation, so they are tested without a browser.
+ * Words on screen. Pure functions of the simulation, so they are tested
+ * without a browser. Byte's reactions are tested in byte.test.js.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { TICKS_PER_SECOND, digest, runShift, step } from '../src/sim/index.js';
-import { createByte } from '../src/ui/byte.js';
+import { TICKS_PER_SECOND, digest, runShift } from '../src/sim/index.js';
 import { actionName, clockText, describeTarget, rejectionText } from '../src/ui/labels.js';
 import { HIT_AREAS } from '../src/view/scene.js';
 import { createPlayer } from './support/players.js';
@@ -59,67 +58,4 @@ test('describing targets never changes the state', () => {
     assert.equal(digest(state), before);
   });
   assert.equal(run.state.phase, 'ended');
-});
-
-/**
- * Plays a shift and collects every line Byte says, with its tick.
- * @param {Parameters<typeof createPlayer>[0]} kind
- */
-function byteDuring(kind) {
-  const byte = createByte();
-  /** @type {{ tick: number, line: string }[]} */
-  const lines = [];
-  const run = runShift({}, createPlayer(kind), (state, events) => {
-    const before = digest(state);
-    const line = byte.onTick(state, events);
-    assert.equal(digest(state), before, 'Byte changed the state');
-    if (line !== null) lines.push({ tick: state.tick, line });
-  });
-  return { lines, run };
-}
-
-test('Byte teaches each thing once and leaves each line up for at least three seconds', () => {
-  const { lines } = byteDuring('priority');
-  const texts = lines.map((l) => l.line);
-  assert.equal(texts[0], 'Doors are open! Guests order at the counter.');
-  assert.ok(texts.some((t) => t.includes('Tap the coffee machine')));
-  assert.ok(texts.some((t) => t.includes('hand it over')));
-  assert.ok(texts.some((t) => t.includes('Tap them to answer')));
-  assert.equal(new Set(texts).size, texts.length, 'a taught line was repeated');
-  for (let i = 1; i < lines.length; i++) {
-    assert.ok(lines[i].tick - lines[i - 1].tick >= 3 * TICKS_PER_SECOND, `lines ${i - 1} and ${i} are too close`);
-  }
-  // A handful of lines in a 75-second shift, not a running commentary.
-  assert.ok(lines.length >= 6 && lines.length <= 14, `${lines.length} lines`);
-});
-
-test('Byte never narrates routine actions', () => {
-  const { lines, run } = byteDuring('priority');
-  const routine = run.events.filter((e) => e.type === 'actionStarted' || e.type === 'actionCompleted').length;
-  assert.ok(routine > 40);
-  assert.ok(lines.length < routine / 3);
-});
-
-test('Byte gives each reminder at most twice, at least twelve seconds apart', () => {
-  const byte = createByte();
-  const state = scene([]);
-  for (const dish of state.dishes) dish.holder = { kind: 'sink' };
-  for (const t of state.tables) t.state = 'dirty';
-  /** @type {{ tick: number, line: string }[]} */
-  const lines = [];
-  for (let i = 0; i < 2200; i++) {
-    const events = step(state);
-    const line = byte.onTick(state, events);
-    if (line !== null) lines.push({ tick: state.tick, line });
-  }
-  const dishes = lines.filter((l) => l.line.startsWith('No clean dishes'));
-  const tables = lines.filter((l) => l.line.startsWith('Every table is dirty'));
-  assert.equal(dishes.length, 2);
-  assert.equal(tables.length, 2);
-  const reminders = [...dishes, ...tables].sort((a, b) => a.tick - b.tick);
-  for (let i = 1; i < reminders.length; i++) {
-    assert.ok(reminders[i].tick - reminders[i - 1].tick >= 12 * TICKS_PER_SECOND);
-  }
-  // The first reminder waits four seconds, to give the player a chance.
-  assert.ok(dishes[0].tick >= 4 * TICKS_PER_SECOND);
 });
