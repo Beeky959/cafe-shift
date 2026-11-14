@@ -21,6 +21,7 @@ import * as art from './art.js';
 import { CAST, OWNER, byte, person, sparkle } from './characters.js';
 import { STAGE, clothAt, guestClip, machineClip, ownerClip, passClip, seatOf, sinkClip, tableCentre, tableDirt } from './clips.js';
 import { PROPS, chair, cloth, cupWithFill, dishInHand, drawBackground, drawForeground, drawLightGlow, drawMachine, drawPass, drawRack, drawSink, drawTableTop, steam } from './props.js';
+import { phases, smooth as smoothU, easeOut, easeOutBack, anticipateSettle, bounce, arc, secondaryBob, secondarySwing, hipShift, shoulderCounter } from './anim-utils.js';
 
 export { SCENE_HEIGHT, SCENE_WIDTH };
 
@@ -49,6 +50,7 @@ const QUEUE_SCALE = 0.88;
  * @property {() => { cssWidth: number, cssHeight: number, pixelRatio: number, scale: number }} metrics
  */
 
+// Local clamp01 for rendering code; `clamp` is the anim-utils import for pose building.
 const clamp01 = (/** @type {number} */ v) => Math.max(0, Math.min(1, v));
 const smooth = (/** @type {number} */ t) => {
   const x = clamp01(t);
@@ -445,93 +447,332 @@ export function createRenderer(canvas) {
     const blink = (time * 1000) % 4100 < 120 ? 'closed' : 'open';
     /** @type {Face} */
     const face = { eyes: blink, mouth: 'smile', lookX: O.facing * 0.6 };
+
+    // ── Weight transfer during walk ──
+    const hip = hipShift(O.stride, O.walk * motion);
+    const shoulderT = shoulderCounter(O.stride, O.walk * motion);
+
+    // ── Breathing: subtle chest expansion when idle or working ──
+    const breatheCycle = Math.sin(time * 1.8) * 0.5 + 0.5;
+
     /** @type {Pose} */
     const pose = {
       stride: O.stride,
       walk: O.walk,
       facing: O.facing,
-      bob: Math.sin(time * 2) * 0.8 * motion,
+      bob: Math.sin(time * 2) * 0.8 * motion + hip.y,
       hideLegs: O.y < STAGE.behindY + 30,
       face,
+      hipX: hip.x,
+      hipTilt: hip.tilt,
+      shoulderTilt: shoulderT,
+      headSettle: -shoulderT * 0.4 + Math.sin(O.stride + 0.8) * 0.015 * O.walk * motion,
+      breathe: breatheCycle * (1 - O.walk), // breathe only when not walking
     };
     const p = clip.progress;
     const item = clip.item;
     switch (clip.kind) {
+      // ═══════════════════════════════════════════════════════════════
+      //  WALK — weight transfer, arm momentum, carried items sway
+      // ═══════════════════════════════════════════════════════════════
       case 'walk': {
         if (item === 'cloth') {
-          pose.rightHand = { x: -20, y: -78 };
+          // Cloth swings with walk momentum
+          const swingX = secondarySwing(O.stride, O.walk, -0.6, 4) * motion;
+          pose.rightHand = { x: -20 + swingX, y: -78 + secondaryBob(O.stride, O.walk, -0.5, 2) * motion };
           pose.holdRight = (c, x, y) => cloth(c, x, y);
         } else if (item) {
           const carried = /** @type {OrderItem | 'cup'} */ (item);
-          pose.rightHand = { x: 6 + O.facing * 10, y: -90 };
+          // Carried item has overlapping motion: lags behind body movement
+          const lagX = secondarySwing(O.stride, O.walk, -0.7, 3) * motion;
+          const lagY = secondaryBob(O.stride, O.walk, -0.5, 2.5) * motion;
+          pose.rightHand = { x: 6 + O.facing * 10 + lagX, y: -90 + lagY };
+          // Both hands stabilize the item when walking fast
+          if (O.walk > 0.5) pose.leftHand = { x: 16 + lagX * 0.5, y: -86 + lagY * 0.6 };
           pose.holdRight = (c, x, y) => heldItem(c, carried, x, y - 4, 26);
           face.mouth = 'smile';
         }
+        // Head bobs with walk, lagging slightly
+        pose.headSettle = (pose.headSettle ?? 0) + secondaryBob(O.stride, O.walk, -0.3, 0.012) * motion;
         break;
       }
+      // ═══════════════════════════════════════════════════════════════
+      //  BREW — the hero sequence: reach → pick up cup → carry to
+      //  spout → place carefully → press button with snap
+      // ═══════════════════════════════════════════════════════════════
       case 'brew': {
         const cupAt = PROPS.machine.cup;
-        if (p < 0.6) {
-          // Carry a clean cup to the spout.
-          const k = smooth(p / 0.6);
-          const from = { x: O.x - 10, y: O.y - 92 };
-          const to = { x: cupAt.x + 6, y: cupAt.y - 2 };
-          const hand = local(from.x + (to.x - from.x) * k, from.y + (to.y - from.y) * k);
-          pose.rightHand = hand;
-          pose.holdRight = (c, x, y) => cupWithFill(c, x - 6, y - 8, 40, 0, false);
-        } else {
-          // The cup sits under the spout; press the brew button.
-          cupWithFill(cx, cupAt.x, cupAt.y, 40, 0, false);
-          const press = Math.sin(((p - 0.6) / 0.4) * Math.PI);
-          pose.rightHand = local(PROPS.machine.x + PROPS.machine.w - 10 + press * 4, PROPS.machine.y + 40);
-          pose.leftHand = { x: 22, y: -80 };
+        const { phase: brewPhase, t: bt } = phases(p, [
+          ['anticipate', 0.08],  // body gathers before reaching
+          ['reach', 0.18],       // reach for clean cup from rack area
+          ['lift', 0.12],        // lift cup with slight weight
+          ['carry', 0.22],       // carry cup to machine spout in an arc
+          ['place', 0.10],       // set cup down with care
+          ['press', 0.18],       // press brew button with snap
+          ['settle', 0.12],      // settle back, satisfied
+        ]);
+
+        const cupFrom = { x: O.x - 10, y: O.y - 92 };
+        const cupTo = { x: cupAt.x + 6, y: cupAt.y - 2 };
+
+        switch (brewPhase) {
+          case 'anticipate': {
+            // Slight lean toward machine — gathering energy before reaching
+            pose.lean = -0.02 * easeOut(bt) * motion;
+            face.lookX = -0.8;
+            face.lookY = -0.2;
+            // Hands come together in front briefly
+            pose.rightHand = { x: -8, y: -86 + bt * -6 };
+            pose.leftHand = { x: 12, y: -84 + bt * -4 };
+            break;
+          }
+          case 'reach': {
+            // Reach out toward where the cups are — eased with follow-through
+            const k = easeOutBack(bt, 1.1);
+            const reachTarget = { x: (cupFrom.x - O.x) / s - 8, y: (cupFrom.y - O.y) / s - 12 };
+            pose.rightHand = { x: reachTarget.x * k, y: -86 + reachTarget.y * k };
+            pose.lean = -0.02 * motion;
+            // Left hand goes to hip (weight shift)
+            pose.leftHand = { x: 22, y: -78 };
+            face.lookX = -1;
+            face.lookY = -0.4;
+            face.mouth = 'neutral';
+            break;
+          }
+          case 'lift': {
+            // Cup picked up — slight bob from the weight
+            const k = easeOut(bt);
+            const liftBob = Math.sin(bt * Math.PI) * 3 * motion;
+            pose.bob = (pose.bob ?? 0) + liftBob;
+            const liftHand = local(cupFrom.x, cupFrom.y - 10 * k);
+            pose.rightHand = liftHand;
+            pose.holdRight = (c, x, y) => cupWithFill(c, x - 6, y - 8, 40, 0, false);
+            pose.leftHand = { x: 22, y: -78 };
+            face.lookX = -0.8;
+            break;
+          }
+          case 'carry': {
+            // Carry cup to spout in a gentle arc — the cup leads, body follows
+            const k = smoothU(bt);
+            // Arc trajectory: cup rises then settles
+            const handWorld = arc(cupFrom, cupTo, k, -18);
+            pose.rightHand = local(handWorld.x, handWorld.y);
+            pose.holdRight = (c, x, y) => cupWithFill(c, x - 6, y - 8, 40, 0, false);
+            // Body shifts weight to follow the cup
+            pose.lean = (-0.02 + bt * 0.02) * motion;
+            // Left hand steadies — secondary motion
+            pose.leftHand = { x: 22 - bt * 4, y: -78 - bt * 6 };
+            face.lookX = -1 + bt * 0.4;
+            face.lookY = -0.3;
+            break;
+          }
+          case 'place': {
+            // Set cup down carefully — controlled deceleration
+            const k = easeOut(bt);
+            const settleY = cupTo.y - 2 + k * 2;
+            pose.rightHand = local(cupTo.x, settleY);
+            pose.holdRight = (c, x, y) => cupWithFill(c, x - 6, y - 8, 40, 0, false);
+            // Slight forward lean while placing
+            pose.lean = 0;
+            pose.leftHand = { x: 18, y: -84 };
+            face.lookX = -0.6;
+            face.lookY = -0.5;
+            face.mouth = 'neutral';
+            break;
+          }
+          case 'press': {
+            // Cup sits under spout; press brew button with snap
+            cupWithFill(cx, cupAt.x, cupAt.y, 40, 0, false);
+            // Anticipation → snap → follow-through on button press
+            const pressK = anticipateSettle(bt, 0.08, 0.06);
+            const buttonX = PROPS.machine.x + PROPS.machine.w - 10;
+            const buttonY = PROPS.machine.y + 40;
+            pose.rightHand = local(buttonX + pressK * 6, buttonY);
+            pose.leftHand = { x: 22, y: -80 };
+            // Body reacts to press: micro-lean forward then settle
+            pose.lean = pressK * -0.015 * motion;
+            face.lookX = -0.8;
+            face.lookY = -0.3;
+            // Mouth tightens with effort then relaxes
+            face.mouth = bt < 0.5 ? 'neutral' : 'smile';
+            break;
+          }
+          case 'settle': {
+            // Step back, satisfied — follow-through
+            cupWithFill(cx, cupAt.x, cupAt.y, 40, 0, false);
+            const k = easeOut(bt);
+            pose.rightHand = local(PROPS.machine.x + PROPS.machine.w - 10, PROPS.machine.y + 40);
+            pose.rightHand = { x: -6 * k, y: -86 };
+            pose.leftHand = { x: 22, y: -80 };
+            face.lookX = -0.6;
+            face.lookY = -0.2;
+            face.mouth = 'smile';
+            // Slight bounce-back as body settles
+            pose.bob = (pose.bob ?? 0) + Math.sin(bt * Math.PI) * 1.5 * motion;
+            break;
+          }
         }
-        face.lookX = -1;
-        face.lookY = -0.4;
         break;
       }
+      // ═══════════════════════════════════════════════════════════════
+      //  PLATE — reach into case → lift croissant → carry to pass
+      // ═══════════════════════════════════════════════════════════════
       case 'plate': {
         const into = { x: PROPS.caseBox.x + 110, y: PROPS.caseBox.y + 44 };
         const pass = { x: PROPS.pass.x + 4, y: PROPS.pass.y - 6 };
-        const k = p < 0.45 ? smooth(p / 0.45) : smooth((p - 0.45) / 0.55);
-        const from = p < 0.45 ? { x: O.x - 14, y: O.y - 92 } : into;
-        const to = p < 0.45 ? into : pass;
-        pose.rightHand = local(from.x + (to.x - from.x) * k, from.y + (to.y - from.y) * k);
-        if (p >= 0.45) pose.holdRight = (c, x, y) => heldItem(c, 'croissant', x, y, 24);
-        face.lookX = -1;
+        const { phase: platePhase, t: pt } = phases(p, [
+          ['reach', 0.30],
+          ['lift', 0.15],
+          ['carry', 0.35],
+          ['place', 0.20],
+        ]);
+
+        switch (platePhase) {
+          case 'reach': {
+            const k = easeOutBack(pt, 1.0);
+            pose.rightHand = local(O.x - 14 + (into.x - O.x + 14) * k, O.y - 92 + (into.y - O.y + 92) * k);
+            face.lookX = -1;
+            pose.lean = -0.015 * k * motion;
+            break;
+          }
+          case 'lift': {
+            const k = easeOut(pt);
+            pose.rightHand = local(into.x, into.y - 12 * k);
+            pose.holdRight = (c, x, y) => heldItem(c, 'croissant', x, y, 24);
+            pose.bob = (pose.bob ?? 0) + Math.sin(pt * Math.PI) * 2 * motion;
+            face.lookX = -1;
+            break;
+          }
+          case 'carry': {
+            const k = smoothU(pt);
+            const handWorld = arc(into, pass, k, -14);
+            pose.rightHand = local(handWorld.x, handWorld.y);
+            pose.holdRight = (c, x, y) => heldItem(c, 'croissant', x, y, 24);
+            face.lookX = -1 + pt * 0.6;
+            break;
+          }
+          case 'place': {
+            const k = easeOut(pt);
+            pose.rightHand = local(pass.x, pass.y - 4 + k * 4);
+            pose.holdRight = (c, x, y) => heldItem(c, 'croissant', x, y, 24);
+            face.lookX = -0.4;
+            face.mouth = 'smile';
+            break;
+          }
+        }
         break;
       }
+      // ═══════════════════════════════════════════════════════════════
+      //  SERVE — lean back (anticipation) → extend with arc →
+      //  hold → release with follow-through
+      // ═══════════════════════════════════════════════════════════════
       case 'serve': {
-        // Lean over the counter and hold the item out to the guest.
-        const k = smooth(p);
-        pose.rightHand = { x: 4, y: -96 + k * 16 };
-        pose.leftHand = { x: 14, y: -90 + k * 10 };
-        pose.lean = 0;
-        if (item === 'latte' || item === 'croissant') pose.holdRight = (c, x, y) => heldItem(c, item, x, y - 6, 28);
-        face.mouth = 'grin';
-        face.lookY = 0.6;
+        const { phase: servePhase, t: st } = phases(p, [
+          ['anticipate', 0.15],  // gather, lean back slightly
+          ['extend', 0.35],      // lean forward, extend item
+          ['hold', 0.30],        // hold steady while guest takes it
+          ['settle', 0.20],      // release, settle back
+        ]);
+
+        switch (servePhase) {
+          case 'anticipate': {
+            // Lean back slightly, gathering — the wind-up before the serve
+            const k = easeOut(st);
+            pose.lean = 0.02 * k * motion;
+            pose.rightHand = { x: 4, y: -96 + k * -4 };
+            pose.leftHand = { x: 14, y: -90 };
+            if (item === 'latte' || item === 'croissant') pose.holdRight = (c, x, y) => heldItem(c, item, x, y - 6, 28);
+            face.mouth = 'smile';
+            face.lookY = 0.3;
+            break;
+          }
+          case 'extend': {
+            // Lean forward to offer the item — the main serve action
+            const k = easeOutBack(st, 0.8);
+            pose.lean = (0.02 - 0.04 * k) * motion;
+            pose.rightHand = { x: 4, y: -100 + k * 20 };
+            pose.leftHand = { x: 14, y: -90 + k * 10 };
+            if (item === 'latte' || item === 'croissant') pose.holdRight = (c, x, y) => heldItem(c, item, x, y - 6, 28);
+            face.mouth = 'grin';
+            face.lookY = 0.4 + st * 0.3;
+            // Eyes widen at the moment of offering
+            if (st > 0.5) face.eyes = 'open';
+            break;
+          }
+          case 'hold': {
+            // Holding steady — slight bobble shows anticipation
+            const sway = Math.sin(st * Math.PI * 3) * 0.5 * motion;
+            pose.rightHand = { x: 4, y: -80 + sway };
+            pose.leftHand = { x: 14, y: -80 + sway * 0.6 };
+            pose.lean = -0.02 * motion;
+            if (item === 'latte' || item === 'croissant') pose.holdRight = (c, x, y) => heldItem(c, item, x, y - 6, 28);
+            face.mouth = 'grin';
+            face.lookY = 0.6;
+            break;
+          }
+          case 'settle': {
+            // Hands come back — follow-through with slight bounce
+            const k = bounce(st, 0.15);
+            pose.rightHand = { x: 4 - k * 8, y: -80 - k * 10 };
+            pose.leftHand = { x: 14 - k * 4, y: -80 - k * 8 };
+            pose.lean = (-0.02 + k * 0.02) * motion;
+            face.mouth = 'smile';
+            face.lookY = 0.6 - st * 0.3;
+            // Bob from settling weight back
+            pose.bob = (pose.bob ?? 0) + Math.sin(st * Math.PI) * 2 * motion;
+            break;
+          }
+        }
         break;
       }
+      // ═══════════════════════════════════════════════════════════════
+      //  ANSWER — expressive gesturing with overlapping action
+      // ═══════════════════════════════════════════════════════════════
       case 'answer': {
-        // Talking it through: an open hand, and a moving mouth.
+        // Expressive gesture with overlapping action
         const wave = Math.sin(time * 7) * motion;
-        pose.rightHand = { x: -26 + wave * 5, y: -124 + wave * 3 };
-        face.mouth = Math.floor(time * 8 * motion) % 2 === 0 ? 'talk' : 'neutral';
+        const gestureY = Math.sin(time * 3.5) * 6 * motion;
+        // Primary gesture hand: arc motion, not just side-to-side
+        pose.rightHand = { x: -26 + wave * 6, y: -124 + gestureY };
+        // Left hand provides counterbalance
+        pose.leftHand = { x: 16 + Math.sin(time * 3.5 + 1.5) * 2 * motion, y: -82 };
+        // Mouth alternates more naturally: talk → pause → emphasize
+        const mouthCycle = time * 6 * motion;
+        face.mouth = Math.sin(mouthCycle) > 0.2 ? 'talk' : Math.sin(mouthCycle) > -0.3 ? 'neutral' : 'smile';
         face.lookY = 0.5;
+        // Subtle body sway while explaining
+        pose.lean = Math.sin(time * 2.8) * 0.012 * motion;
+        // Head nods gently
+        pose.headSettle = Math.sin(time * 3) * 0.02 * motion;
         break;
       }
+      // ═══════════════════════════════════════════════════════════════
+      //  WASH — circular scrubbing with weight and effort
+      // ═══════════════════════════════════════════════════════════════
       case 'wash': {
         const basin = PROPS.sink.basin;
-        const a = p * Math.PI * 2 * 4;
-        const hx = basin.x - 26 + Math.sin(a) * 9 * (motion || 0.4);
-        const hy = basin.y + 2 + Math.cos(a) * 3;
+        const scrubCycles = 4;
+        const a = p * Math.PI * 2 * scrubCycles;
+        // Scrubbing motion: elliptical, not perfectly circular
+        const scrubX = Math.sin(a) * 10 * (motion || 0.4);
+        const scrubY = Math.cos(a) * 4;
+        const hx = basin.x - 26 + scrubX;
+        const hy = basin.y + 2 + scrubY;
         pose.leftHand = local(hx + 10, hy);
         pose.rightHand = local(hx - 8, hy + 2);
         pose.holdLeft = (c, x, y) => dishInHand(c, x - 6, y, p);
+        // Body sways with scrubbing effort — overlapping action
+        pose.lean = Math.sin(a) * 0.015 * motion;
+        pose.bob = (pose.bob ?? 0) + Math.abs(Math.sin(a)) * 1.5 * motion;
         face.lookX = 1;
         face.lookY = 0.6;
+        // Concentrated expression
+        face.mouth = Math.abs(Math.sin(a * 0.5)) > 0.8 ? 'neutral' : 'smile';
         break;
       }
+      // ═══════════════════════════════════════════════════════════════
+      //  WIPE — whole-body effort with follow-through
+      // ═══════════════════════════════════════════════════════════════
       case 'wipe': {
         const at = clothAt(clip.tableId ?? 1, p);
         pose.rightHand = local(at.x, at.y);
@@ -539,10 +780,18 @@ export function createRenderer(canvas) {
         pose.leftHand = { x: 16, y: -86 };
         face.lookX = -1;
         face.lookY = 0.7;
+        // Body follows the wiping motion — overlapping action
+        const wipeProgress = p * Math.PI * 10;
+        pose.lean = Math.sin(wipeProgress) * 0.02 * motion;
+        pose.bob = (pose.bob ?? 0) + Math.abs(Math.sin(wipeProgress)) * 1 * motion;
+        // Effort expression
+        face.mouth = p < 0.7 ? 'neutral' : 'smile';
         break;
       }
       default: {
-        // Idle: glance towards whoever is waiting longest.
+        // ═══════════════════════════════════════════════════════════
+        //  IDLE — alive: weight shifts, glances, breathing
+        // ═══════════════════════════════════════════════════════════
         const waiting = state.guests.filter((g) => g.place.kind === 'spot' && g.state === 'waiting');
         if (waiting.length > 0) {
           const g = waiting.reduce((a, b) => (a.patienceLeft < b.patienceLeft ? a : b));
@@ -550,6 +799,14 @@ export function createRenderer(canvas) {
           if (body) face.lookX = Math.max(-1, Math.min(1, (body.x - O.x) / 200));
           face.lookY = 0.6;
         }
+        // Idle weight shift: subtle hip sway even when standing still
+        const idleSway = Math.sin(time * 0.9) * 0.4 * motion;
+        pose.hipX = idleSway;
+        pose.hipTilt = Math.sin(time * 0.9) * 0.008 * motion;
+        // Occasional subtle lean
+        pose.lean = Math.sin(time * 0.6) * 0.008 * motion;
+        // Arms hang naturally with slight movement
+        pose.armSwing = Math.sin(time * 1.2) * 0.04 * motion;
       }
     }
     return pose;
@@ -574,15 +831,36 @@ export function createRenderer(canvas) {
     if (seated && body) {
       const spec = state.schedule.find((s) => s.id === seated.id);
       const phase = seated.id * 1.7;
-      const sip = spec?.order === 'latte' && Math.sin(time * 0.9 + phase) > 0.9 && motion > 0;
+      // Sip cycle: anticipation (reach) → sip → lower → rest
+      const sipCycle = (time * 0.9 + phase) % (Math.PI * 2);
+      const sipActive = spec?.order === 'latte' && sipCycle > 5.2 && motion > 0;
+      const sipT = sipActive ? clamp01((sipCycle - 5.2) / 1.0) : 0;
+      // Smooth sip arc: cup rises, pauses, lowers
+      const sipLift = sipActive ? (sipT < 0.4 ? easeOut(sipT / 0.4) : sipT < 0.7 ? 1 : easeOut((1 - sipT) / 0.3)) : 0;
+      const isBlinking = (time * 1000 + phase * 900) % 3900 < 120;
+      const seatedBob = Math.sin(time * 1.6 + phase) * 0.6 * motion;
+      const seatedBreath = Math.sin(time * 1.4 + phase) * 0.5 + 0.5;
       person(cx, body.x, body.y - 16, GUEST_SCALE, CAST[body.look % CAST.length], {
         seated: true,
         facing: 1,
-        bob: Math.sin(time * 1.6 + phase) * 0.6 * motion,
-        face: { eyes: (time * 1000 + phase * 900) % 3900 < 120 ? 'closed' : sip ? 'happy' : 'open', mouth: 'smile', blush: anim.joy(seated.id) > 0, lookX: 0.6 },
-        rightHand: sip ? { x: -6, y: -128 } : { x: 30, y: -76 },
-        leftHand: { x: 40, y: -80 },
-        holdRight: sip ? (cc, x, y) => cupWithFill(cc, x, y - 4, 22, 0.8, false) : null,
+        bob: seatedBob + (sipActive ? -sipLift * 3 : 0) * motion,
+        breathe: seatedBreath,
+        face: {
+          eyes: isBlinking ? 'closed' : sipActive && sipLift > 0.8 ? 'closed' : sipActive ? 'happy' : 'open',
+          mouth: sipActive && sipLift > 0.8 ? 'o' : 'smile',
+          blush: anim.joy(seated.id) > 0,
+          lookX: sipActive ? 0 : 0.6,
+          lookY: sipActive ? -0.3 : 0,
+        },
+        rightHand: sipActive
+          ? { x: -6 - sipLift * 4, y: -76 - sipLift * 52 }
+          : { x: 30, y: -76 },
+        leftHand: { x: 40, y: -80 + (sipActive ? sipLift * -4 : 0) },
+        holdRight: sipActive
+          ? (cc, x, y) => cupWithFill(cc, x, y - 4, 22, 0.8, false)
+          : null,
+        // Subtle head tilt while sipping
+        headSettle: sipActive ? sipLift * -0.06 : Math.sin(time * 0.8 + phase) * 0.01 * motion,
       });
     }
     const wiped = anim.progressOf('tableWiped', (f) => f.tableId === tableId);
@@ -617,10 +895,17 @@ export function createRenderer(canvas) {
     const scale = g.place.kind === 'door' ? QUEUE_SCALE : GUEST_SCALE;
     /** @type {Face} */
     const face = { eyes: blink ? 'closed' : 'open', mouth: 'smile', lookX: 0, lookY: 0 };
+    // Weight transfer for walking guests
+    const gHip = hipShift(body.stride, body.walk * motion);
+    const gShoulder = shoulderCounter(body.stride, body.walk * motion);
     /** @type {Pose} */
-    const pose = { stride: body.stride, walk: body.walk, facing: body.facing, face, bob: 0 };
+    const pose = {
+      stride: body.stride, walk: body.walk, facing: body.facing, face, bob: 0,
+      hipX: gHip.x, hipTilt: gHip.tilt, shoulderTilt: gShoulder,
+      headSettle: -gShoulder * 0.3,
+    };
     const idle = motion * (body.walk < 0.2 ? 1 : 0);
-    pose.bob = Math.sin(time * 2.2 + phase) * 0.8 * idle;
+    pose.bob = Math.sin(time * 2.2 + phase) * 0.8 * idle + gHip.y;
     const item = /** @type {OrderItem} */ (body.order);
 
     if (clip.mood === 'impatient') {
@@ -680,7 +965,18 @@ export function createRenderer(canvas) {
       face.mouth = 'grin';
       face.blush = true;
       face.sweat = false;
-      pose.bob = -Math.abs(Math.sin((1 - joy) * Math.PI * 2)) * 7 * motion;
+      // Bouncy delight: a quick hop that settles with follow-through
+      const joyPhase = 1 - joy;
+      const hopHeight = joyPhase < 0.3
+        ? -Math.sin((joyPhase / 0.3) * Math.PI) * 10
+        : -Math.sin(((joyPhase - 0.3) / 0.7) * Math.PI * 2) * 3 * Math.max(0, 1 - joyPhase * 1.2);
+      pose.bob = hopHeight * motion;
+      // Shoulders rise with delight
+      pose.shoulderTilt = Math.sin(joyPhase * Math.PI * 4) * 0.03 * motion;
+      // Head tilts with happiness
+      pose.headSettle = Math.sin(joyPhase * Math.PI * 3) * 0.04 * motion;
+      pose.crossedArms = false;
+      pose.footTap = 0;
     } else if (clip.kind === 'standing') {
       face.mouth = 'neutral';
       face.eyes = blink ? 'closed' : 'down';
@@ -710,12 +1006,21 @@ export function createRenderer(canvas) {
     const unhappy = ghost.mood !== 'happy';
     const facing = ghost.path[ghost.path.length - 1].x < ghost.path[0].x ? -1 : 1;
     cx.globalAlpha = fade;
+    const ghostStride = ghost.stride + t * ghost.duration * 0.02;
+    const ghostWalk = t < 0.1 ? t / 0.1 : t > 0.85 ? (1 - t) / 0.15 : 1;
+    const ghostHip = hipShift(ghostStride, ghostWalk * motion);
     person(cx, at.x, at.y, GUEST_SCALE, look, {
-      stride: ghost.stride + t * ghost.duration * 0.02,
-      walk: 1,
+      stride: ghostStride,
+      walk: ghostWalk,
       facing,
-      face: unhappy ? { eyes: 'down', mouth: 'frown', brows: 'worried' } : { eyes: 'happy', mouth: 'smile', blush: true },
+      face: unhappy
+        ? { eyes: 'down', mouth: 'frown', brows: 'worried' }
+        : { eyes: 'happy', mouth: 'smile', blush: true },
       lean: unhappy ? -0.06 : 0,
+      hipX: ghostHip.x,
+      hipTilt: ghostHip.tilt,
+      shoulderTilt: shoulderCounter(ghostStride, ghostWalk * motion),
+      headSettle: unhappy ? Math.sin(time * 2) * 0.03 * motion : 0,
       rightHand: unhappy ? null : { x: -30, y: -138 + Math.sin(time * 12) * 4 * motion },
     });
     if (unhappy) {

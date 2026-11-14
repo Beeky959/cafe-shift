@@ -79,6 +79,11 @@ export const OWNER = /** @type {Look} */ ({
  * @property {((cx: Ctx, x: number, y: number) => void) | null} [holdLeft] Draws what the left hand holds.
  * @property {((cx: Ctx, x: number, y: number) => void) | null} [holdRight]
  * @property {boolean} [hideLegs] For figures standing behind the counter.
+ * @property {number} [hipX] Horizontal hip shift for weight transfer during walk.
+ * @property {number} [hipTilt] Hip tilt in radians for weight transfer.
+ * @property {number} [shoulderTilt] Shoulder counter-rotation (opposite hip tilt).
+ * @property {number} [headSettle] Additional head tilt, for settle/follow-through.
+ * @property {number} [breathe] 0–1, subtle torso breathing cycle.
  */
 
 const HIP_Y = -64;
@@ -480,17 +485,31 @@ export function person(cx, x, y, scale, look, pose) {
   if (pose.seated) cx.translate(0, -HIP_Y - 6);
   cx.rotate(pose.lean ?? 0);
 
-  // Legs.
+  // Hip weight transfer: translate and tilt from the hips.
+  const hipX = pose.hipX ?? 0;
+  const hipTilt = pose.hipTilt ?? 0;
+
+  // Legs: drawn from hip pivot with weight shift.
   if (!pose.hideLegs && !pose.seated) {
-    const swing = Math.sin(pose.stride ?? 0) * 0.42 * (pose.walk ?? 0);
-    const liftA = Math.max(0, Math.sin(pose.stride ?? 0)) * 6 * (pose.walk ?? 0);
-    const liftB = Math.max(0, -Math.sin(pose.stride ?? 0)) * 6 * (pose.walk ?? 0);
-    leg(cx, -9, swing, liftA, look, true);
-    leg(cx, 9, -swing, Math.max(liftB, (pose.footTap ?? 0) * 7), look, false);
+    cx.save();
+    cx.translate(hipX, 0);
+    cx.rotate(hipTilt);
+    const stride = pose.stride ?? 0;
+    const walk = pose.walk ?? 0;
+    const swing = Math.sin(stride) * 0.42 * walk;
+    const liftA = Math.max(0, Math.sin(stride)) * 6 * walk;
+    const liftB = Math.max(0, -Math.sin(stride)) * 6 * walk;
+    // Push-off: trailing leg extends a bit more for weight
+    const pushOff = Math.max(0, Math.sin(stride + 0.4)) * 0.06 * walk;
+    leg(cx, -9, swing + pushOff, liftA, look, true);
+    leg(cx, 9, -swing - pushOff, Math.max(liftB, (pose.footTap ?? 0) * 7), look, false);
+    cx.restore();
   }
 
-  const sL = { x: 19, y: SHOULDER_Y + 4 };
-  const sR = { x: -19, y: SHOULDER_Y + 4 };
+  // Shoulder counter-rotation: shoulders twist opposite to hips.
+  const shoulderTilt = pose.shoulderTilt ?? 0;
+  const sL = { x: 19 + shoulderTilt * 12, y: SHOULDER_Y + 4 - Math.abs(shoulderTilt) * 2 };
+  const sR = { x: -19 + shoulderTilt * 12, y: SHOULDER_Y + 4 + Math.abs(shoulderTilt) * 2 };
   const swingA = pose.armSwing ?? Math.sin(pose.stride ?? 0) * 0.35 * (pose.walk ?? 0);
   const rest = (/** @type {number} */ side, /** @type {number} */ a) => ({ x: side * 24 + Math.sin(a) * 18, y: SHOULDER_Y + 44 + Math.cos(a) * 2 });
   const handR = pose.rightHand ?? (pose.crossedArms ? { x: 10, y: -92 } : rest(-1, swingA));
@@ -506,7 +525,13 @@ export function person(cx, x, y, scale, look, pose) {
   if (!leftFront) drawnL = arm(cx, sL.x, sL.y, handL.x, handL.y, 1, look);
   if (!rightFront) drawnR = arm(cx, sR.x, sR.y, handR.x, handR.y, -1, look);
 
-  // Torso.
+  // Torso with subtle breathing.
+  const breathe = pose.breathe ?? 0;
+  const breatheScale = 1 + breathe * 0.008;
+  cx.save();
+  cx.translate(0, SHOULDER_Y + 20);
+  cx.scale(breatheScale, 1);
+  cx.translate(0, -(SHOULDER_Y + 20));
   cx.fillStyle = '#3a2a2a';
   cx.beginPath();
   cx.roundRect(-23, SHOULDER_Y - 4, 46, HIP_Y - SHOULDER_Y + 10, [14, 14, 9, 9]);
@@ -517,12 +542,20 @@ export function person(cx, x, y, scale, look, pose) {
   cx.fill();
   cx.fillStyle = look.topShade;
   cx.fillRect(-21, HIP_Y - 10, 42, 6);
+  cx.restore();
   if (look.apron) {
+    // Apron sways with a slight lag behind the body during movement
+    const apronSwing = hipX * 0.6;
+    cx.save();
+    cx.translate(apronSwing, 0);
     cx.fillStyle = look.apron;
     cx.beginPath();
     cx.roundRect(-16, SHOULDER_Y + 10, 32, HIP_Y - SHOULDER_Y + 4, [6, 6, 4, 4]);
     cx.fill();
-    rounded(cx, -8, HIP_Y - 26, 16, 10, 3, shade(look.apron, -0.2));
+    // Apron pocket with subtle sway
+    rounded(cx, -8 + apronSwing * 0.3, HIP_Y - 26, 16, 10, 3, shade(look.apron, -0.2));
+    cx.restore();
+    // Straps stay with shoulders
     cx.strokeStyle = look.apron;
     cx.lineWidth = 3;
     cx.beginPath();
@@ -541,7 +574,16 @@ export function person(cx, x, y, scale, look, pose) {
     rounded(cx, -21, HIP_Y - 6, 42, 14, 6, look.pants);
   }
 
+  // Head has subtle settle/follow-through tilt.
+  const headSettle = pose.headSettle ?? 0;
+  if (headSettle !== 0) {
+    cx.save();
+    cx.translate(0, HEAD_Y + 20);
+    cx.rotate(headSettle);
+    cx.translate(0, -(HEAD_Y + 20));
+  }
   head(cx, look, pose.face ?? {}, facing);
+  if (headSettle !== 0) cx.restore();
 
   if (leftFront) drawnL = arm(cx, sL.x, sL.y, handL.x, handL.y, 1, look);
   if (rightFront) drawnR = arm(cx, sR.x, sR.y, handR.x, handR.y, -1, look);
