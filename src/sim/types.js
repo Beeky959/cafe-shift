@@ -4,7 +4,9 @@
  * Import types with: `@import { SimState } from './types.js'`
  */
 
-/** @typedef {'latte' | 'croissant'} OrderItem */
+/** @typedef {'espresso' | 'latte' | 'mocha'} DrinkItem */
+/** @typedef {'croissant'} PastryItem */
+/** @typedef {DrinkItem | PastryItem} OrderItem */
 
 /** @typedef {'wifi' | 'menu' | 'instagram' | 'review' | 'website'} SupportedTopic */
 
@@ -52,15 +54,31 @@
 /**
  * @typedef {object} MachineSlot
  * @property {'empty' | 'brewing' | 'ready'} state
+ * @property {DrinkItem | null} drink Which drink is being brewed or is ready.
  * @property {number | null} dishId Reverse reference of a dish held by this slot.
  * @property {number} ticksLeft
- * @property {number | null} claimedBy Id of the hand-over action taking this latte.
+ * @property {number | null} claimedBy Id of the hand-over action taking this drink.
  */
 
 /**
  * @typedef {object} Pass
  * @property {number | null} dishId Reverse reference of the plated croissant's dish.
  * @property {number | null} claimedBy Id of the hand-over action taking this croissant.
+ */
+
+/**
+ * The oven bakes a tray of pastries in the background.
+ * @typedef {object} Oven
+ * @property {'empty' | 'baking' | 'ready'} state
+ * @property {number} ticksLeft
+ * @property {number | null} claimedBy Id of the action loading or unloading.
+ */
+
+/**
+ * Pastry display: customers can only order croissants when stock > 0.
+ * @typedef {object} PastryStock
+ * @property {number} display Number of croissants available in the display case.
+ * @property {number} maxDisplay Maximum the display case holds.
  */
 
 /**
@@ -99,17 +117,19 @@
  * @property {boolean} tipEligible Set at hand-over: served with more than half their patience left.
  */
 
-/** @typedef {'brewStart' | 'plate' | 'handOver' | 'answer' | 'wipe' | 'wash'} OwnerActionKind */
+/** @typedef {'brewStart' | 'plate' | 'handOver' | 'answer' | 'wipe' | 'wash' | 'bakeLoad' | 'bakeUnload' | 'discard'} OwnerActionKind */
 
 /**
  * What the current action has claimed without holding it. Each claim is
  * mirrored on its target (`attendedBy` or `claimedBy`).
  * @typedef {object} ActionClaims
  * @property {number | null} guestId Hand-over or answer.
- * @property {number | null} slot Start-brew (an empty slot) or hand-over (a ready latte).
+ * @property {number | null} slot Start-brew (an empty slot) or hand-over (a ready drink).
+ * @property {DrinkItem | null} drinkType Which drink to brew or hand over from the machine.
  * @property {boolean} pass Plate (the empty pass) or hand-over (a ready croissant).
  * @property {number | null} tableId Wipe.
  * @property {number | null} sinkDishId Wash: the dirty dish being washed. It stays in the sink until done.
+ * @property {boolean} oven BakeLoad or bakeUnload.
  */
 
 /**
@@ -160,7 +180,7 @@
 
 /**
  * @typedef {object} Metrics
- * @property {{ brewStart: number, plate: number, handOver: number, answer: number, wipe: number, wash: number, travel: number, idle: number }} ownerTicks
+ * @property {{ brewStart: number, plate: number, handOver: number, answer: number, wipe: number, wash: number, bakeLoad: number, bakeUnload: number, discard: number, travel: number, idle: number }} ownerTicks
  * @property {{ waiting: number, asking: number }} spotTicks
  * @property {number} allSpotsFullTicks
  * @property {{ served: number, leftHappy: number, leftUnhappy: number, walkedPast: number }} guests
@@ -173,11 +193,17 @@
  * @property {number} travel
  * @property {number} brewStart
  * @property {number} brew
+ * @property {number} brewEspresso
+ * @property {number} brewMocha
  * @property {number} plate
  * @property {number} handOver
  * @property {number} answer
  * @property {number} wipe
  * @property {number} washPerDish
+ * @property {number} bakeLoad
+ * @property {number} bake
+ * @property {number} bakeUnload
+ * @property {number} discard
  * @property {number} walkIn
  * @property {number} walkToTable
  * @property {number} walkToStand
@@ -209,6 +235,8 @@
  * @property {Dish[]} dishes
  * @property {{ slots: MachineSlot[] }} machine
  * @property {Pass} pass
+ * @property {Oven} oven
+ * @property {PastryStock} pastryStock
  * @property {Stand} stand
  * @property {Owner} owner
  * @property {Economy} economy
@@ -221,6 +249,7 @@
  * @typedef {{ kind: 'machine' }
  *   | { kind: 'case' }
  *   | { kind: 'sink' }
+ *   | { kind: 'oven' }
  *   | { kind: 'spot', index: number }
  *   | { kind: 'table', tableId: number }} Target
  */

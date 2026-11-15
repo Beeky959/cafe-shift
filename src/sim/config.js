@@ -24,13 +24,15 @@ function deepFreeze(value) {
 export const TICKS_PER_SECOND = 30;
 
 /** State layout version. Increase when the shape of SimState changes. */
-export const STATE_VERSION = 1;
+export const STATE_VERSION = 2;
 
 /**
  * @typedef {object} ShiftConfig
  * @property {string} id
  * @property {number} lengthSeconds Doors close at this time.
  * @property {number} guests Exact number of scheduled guests.
+ * @property {number} espressoGuests Exact number ordering an espresso.
+ * @property {number} mochaGuests Exact number ordering a mocha.
  * @property {number} croissantGuests Exact number ordering a croissant; the rest order a latte.
  * @property {number} supportedQuestionGuests Exact number asking something a stand could answer.
  * @property {number} unsupportedQuestionGuests Exact number asking something no stand answers.
@@ -54,29 +56,47 @@ export const CONFIG = deepFreeze({
   startingWallet: 0,
   guestLooks: 6,
   ownerStartZone: 'counter',
+  /** Pastries start with this many in the display. */
+  pastryDisplayStart: 3,
+  pastryDisplayMax: 6,
+  /** How many pastries a bake run produces. */
+  pastryBatchSize: 3,
+
+  /** Drinks made at the coffee machine. */
+  drinks: /** @type {import('./types.js').DrinkItem[]} */ (['espresso', 'latte', 'mocha']),
+  /** Which drink types are available (for type checking). */
+  isDrink: /** @type {(item: string) => item is import('./types.js').DrinkItem} */ (
+    (item) => item === 'espresso' || item === 'latte' || item === 'mocha'
+  ),
 
   /** Durations in seconds. Converted to whole ticks once, in createInitialState. */
   seconds: {
     travel: 0.3,
     brewStart: 0.6,
     brew: 3.0,
+    brewEspresso: 2.0,
+    brewMocha: 4.0,
     plate: 0.8,
     handOver: 0.4,
     answer: 2.5,
     wipe: 1.8,
     washPerDish: 1.0,
+    bakeLoad: 0.8,
+    bake: 8.0,
+    bakeUnload: 0.6,
+    discard: 0.4,
     walkIn: 1.0,
     walkToTable: 0.8,
     walkToStand: 0.6,
     standUse: 1.5,
-    counterPatience: 22,
+    counterPatience: 24,
     askingPatience: 14,
     standingConsume: 4,
   },
 
   seatSeconds: { min: 8, max: 12 },
 
-  prices: { latte: 8, croissant: 6, tip: 4 },
+  prices: { espresso: 5, latte: 8, mocha: 10, croissant: 6, tip: 5 },
   /** A seated guest tips if served with more than this share of their counter patience left. */
   tipPatienceFraction: 0.35,
   moodBonusMax: 30,
@@ -101,8 +121,10 @@ export const CONFIG = deepFreeze({
       id: 'slice',
       lengthSeconds: 75,
       guests: 14,
+      espressoGuests: 3,
+      mochaGuests: 2,
       croissantGuests: 4,
-      supportedQuestionGuests: 6,
+      supportedQuestionGuests: 5,
       unsupportedQuestionGuests: 1,
       standUseFraction: 0.75,
       firstArrivalSeconds: 1,
@@ -132,4 +154,13 @@ export function toTicks(seconds) {
   }
   const ticks = Math.round(seconds * TICKS_PER_SECOND);
   return seconds > 0 ? Math.max(1, ticks) : 0;
+}
+
+/**
+ * Convenience re-export of CONFIG.isDrink for modules that import from config.
+ * @param {string} item
+ * @returns {item is import('./types.js').DrinkItem}
+ */
+export function isDrink(item) {
+  return CONFIG.isDrink(item);
 }

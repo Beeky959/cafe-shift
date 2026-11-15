@@ -29,9 +29,9 @@ import { rejectionText } from './labels.js';
 /** @type {Readonly<Record<Station, OrderItem>>} */
 const ITEM_AT = { machine: 'latte', case: 'croissant' };
 /** @type {Readonly<Record<OrderItem, Station>>} */
-const STATION_FOR = { latte: 'machine', croissant: 'case' };
+const STATION_FOR = { espresso: 'machine', latte: 'machine', mocha: 'machine', croissant: 'case' };
 /** @type {Readonly<Record<OrderItem, string>>} */
-export const STATION_NAME = { latte: 'coffee machine', croissant: 'pastry case' };
+export const STATION_NAME = { espresso: 'coffee machine', latte: 'coffee machine', mocha: 'coffee machine', croissant: 'pastry case' };
 
 /** What each question sounds like, and the short form for a card. */
 export const QUESTIONS = /** @type {Readonly<Record<QuestionTopic, { ask: string, short: string }>>} */ ({
@@ -60,9 +60,10 @@ function find(state, guestId) {
  * @returns {boolean} A finished item of this kind is waiting and nobody is already handing it over.
  */
 export function itemReady(state, item) {
-  return item === 'latte'
-    ? state.machine.slots.some((s) => s.state === 'ready' && s.claimedBy === null)
-    : state.pass.dishId !== null && state.pass.claimedBy === null;
+  if (item === 'espresso' || item === 'latte' || item === 'mocha') {
+    return state.machine.slots.some((s) => s.state === 'ready' && s.claimedBy === null && s.drink === item);
+  }
+  return state.pass.dishId !== null && state.pass.claimedBy === null;
 }
 
 /**
@@ -86,7 +87,7 @@ export function createService() {
   /** @type {OrderItem | null} */
   let carrying = null;
   /** Guest each kind of item in progress was started for. Null means it is spare. */
-  const madeFor = /** @type {Record<OrderItem, number | null>} */ ({ latte: null, croissant: null });
+  const madeFor = /** @type {Record<OrderItem, number | null>} */ ({ espresso: null, latte: null, mocha: null, croissant: null });
   /** Start-brew and plate actions that are queued or under way, by action id. */
   const intents = /** @type {Map<number, { item: OrderItem, ticket: number | null }>} */ (new Map());
 
@@ -176,8 +177,11 @@ export function createService() {
    * @returns {Outcome}
    */
   function pressStation(state, station) {
-    const item = ITEM_AT[station];
-    if (carrying === item) {
+    const defaultItem = ITEM_AT[station];
+    // For the machine, the item depends on the selected guest's order or what's ready
+    const selectedOrder = selected ? find(state, selected)?.spec.order : null;
+    const item = station === 'machine' && selectedOrder && STATION_FOR[selectedOrder] === 'machine' ? selectedOrder : defaultItem;
+    if (carrying === item || (station === 'machine' && carrying && STATION_FOR[carrying] === 'machine')) {
       carrying = null;
       return { accepted: true, notice: 'Put back.' };
     }
@@ -185,17 +189,26 @@ export function createService() {
       carrying = item;
       return { accepted: true, notice: `Carrying the ${item}. Now the guest who ordered it.` };
     }
+    // Also check if any drink is ready at the machine (for pickup without selection)
+    if (station === 'machine' && !carrying) {
+      for (const drink of /** @type {import('../sim/types.js').DrinkItem[]} */ (['espresso', 'latte', 'mocha'])) {
+        if (itemReady(state, drink)) {
+          carrying = drink;
+          return { accepted: true, notice: `Carrying the ${drink}. Now the guest who ordered it.` };
+        }
+      }
+    }
     if (selected === null) return { accepted: false, notice: 'Pick an order first: press a guest or their ticket.' };
     const found = find(state, selected);
     if (!found) {
       selected = null;
       return { accepted: false, notice: 'That guest has gone. Pick another order.' };
     }
-    if (found.spec.order !== item) {
+    if (STATION_FOR[found.spec.order] !== station) {
       return { accepted: false, notice: `Ticket ${selected} is a ${found.spec.order}. That is made at the ${STATION_NAME[found.spec.order]}.` };
     }
     const status = orderStatus(state, selected);
-    if (status === 'preparing' || status === 'starting') return { accepted: false, notice: `Ticket ${selected}'s ${item} is already being made.` };
+    if (status === 'preparing' || status === 'starting') return { accepted: false, notice: `Ticket ${selected}'s ${found.spec.order} is already being made.` };
     const target = /** @type {Target} */ ({ kind: station });
     const r = resolveTap(state, target);
     if (!r.ok) return { accepted: false, notice: rejectionText(r.reason) };
@@ -220,6 +233,12 @@ export function createService() {
      * @returns {OrderItem | null}
      */
     pickUp(state, station) {
+      if (station === 'machine') {
+        for (const drink of /** @type {import('../sim/types.js').DrinkItem[]} */ (['espresso', 'latte', 'mocha'])) {
+          if (itemReady(state, drink)) { carrying = drink; return drink; }
+        }
+        return null;
+      }
       const item = ITEM_AT[station];
       if (!itemReady(state, item)) return null;
       carrying = item;
@@ -295,7 +314,7 @@ export function createService() {
         }
       }
       // A guest who has gone, or been served, no longer owns anything here.
-      for (const item of /** @type {OrderItem[]} */ (['latte', 'croissant'])) {
+      for (const item of /** @type {OrderItem[]} */ (['espresso', 'latte', 'mocha', 'croissant'])) {
         const owner = madeFor[item];
         const found = owner === null ? null : find(state, owner);
         if (owner !== null && (!found || (found.guest.state !== 'waiting' && found.guest.state !== 'walkingIn'))) madeFor[item] = null;
@@ -388,7 +407,11 @@ export function createService() {
       /** @type {Station[]} */
       const pickUp = [];
       for (const station of /** @type {Station[]} */ (['machine', 'case'])) {
-        if (!carrying && itemReady(state, ITEM_AT[station])) pickUp.push(station);
+        if (station === 'machine') {
+          if (!carrying && /** @type {import('../sim/types.js').DrinkItem[]} */ (['espresso', 'latte', 'mocha']).some((d) => itemReady(state, d))) pickUp.push(station);
+        } else {
+          if (!carrying && itemReady(state, ITEM_AT[station])) pickUp.push(station);
+        }
       }
       if (carrying) {
         state.spots.forEach((id, index) => {
@@ -426,17 +449,21 @@ export function createService() {
           ? slot.state === 'brewing'
             ? `brewing, ${Math.ceil(slot.ticksLeft / TICKS_PER_SECOND)} seconds left`
             : slot.state === 'ready'
-              ? 'a latte is ready'
+              ? `a ${slot.drink || 'drink'} is ready`
               : 'empty'
           : state.pass.dishId === null
             ? 'nothing plated'
             : 'a croissant is plated';
       let action = 'Select an order first.';
-      if (carrying === item) action = 'Press to put it back.';
-      else if (itemReady(state, item)) action = `Press to pick up the ${item}.`;
+      const drinks = /** @type {import('../sim/types.js').DrinkItem[]} */ (['espresso', 'latte', 'mocha']);
+      if (carrying && (carrying === item || (station === 'machine' && STATION_FOR[carrying] === 'machine'))) action = 'Press to put it back.';
+      else if (station === 'machine' && drinks.some((d) => itemReady(state, d))) {
+        const readyDrink = drinks.find((d) => itemReady(state, d));
+        action = `Press to pick up the ${readyDrink}.`;
+      } else if (itemReady(state, item)) action = `Press to pick up the ${item}.`;
       else if (selected !== null) {
         const found = find(state, selected);
-        action = found && found.spec.order === item ? `Press to make a ${item} for ticket ${selected}.` : `Ticket ${selected} is not made here.`;
+        action = found && STATION_FOR[found.spec.order] === station ? `Press to make a ${found.spec.order} for ticket ${selected}.` : `Ticket ${selected} is not made here.`;
       }
       return `${name}: ${status}. ${action}`;
     },

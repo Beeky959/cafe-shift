@@ -26,6 +26,7 @@ const ALLOWED = new Set([
   'sink>rack', // D8
   'sink>reserved', // D8 + D1
   'reserved>reserved', // D4 + D1
+  'machine>sink', // D10: discard a ready drink
 ]);
 /**
  * Only on the tick the shift ends: unserved items are discarded (D9), and a

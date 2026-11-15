@@ -5,8 +5,8 @@
  * commands, owner, machine, guests, promotions, arrivals, shift phase.
  * Ownership rules: docs/GAME_DESIGN.md §3a.
  */
-/** @import { SimState, SimEvent, Command, Target, LiveGuest, OwnerAction, OwnerActionKind, QueuedAction, GuestSpec, Dish } from './types.js' */
-import { CONFIG } from './config.js';
+/** @import { SimState, SimEvent, Command, Target, LiveGuest, OwnerAction, OwnerActionKind, QueuedAction, GuestSpec, Dish, DrinkItem } from './types.js' */
+import { CONFIG, isDrink } from './config.js';
 
 /** Where each kind of action takes place. */
 const ZONE = /** @type {Readonly<Record<OwnerActionKind, string>>} */ ({
@@ -16,6 +16,9 @@ const ZONE = /** @type {Readonly<Record<OwnerActionKind, string>>} */ ({
   answer: 'counter',
   wipe: 'floor',
   wash: 'sink',
+  bakeLoad: 'oven',
+  bakeUnload: 'oven',
+  discard: 'machine',
 });
 
 /** @typedef {(type: string, detail?: Record<string, string | number | boolean | null>) => void} Emit */
@@ -57,11 +60,79 @@ function firstDishIn(state, kind) {
  * @returns {{ slot: number | null, pass: boolean } | null} A ready, unclaimed item of that kind.
  */
 function findReadyItem(state, order) {
-  if (order === 'latte') {
-    const slot = state.machine.slots.findIndex((s) => s.state === 'ready' && s.claimedBy === null);
+  if (isDrink(order)) {
+    // Find a ready machine slot whose drink type matches the order
+    const slot = state.machine.slots.findIndex(
+      (s) => s.state === 'ready' && s.claimedBy === null && s.drink === order,
+    );
     return slot === -1 ? null : { slot, pass: false };
   }
+  // Pastry: must be on the pass
   return state.pass.dishId !== null && state.pass.claimedBy === null ? { slot: null, pass: true } : null;
+}
+
+/**
+ * Picks which drink to brew next. Looks at waiting/walkingIn guests at the counter
+ * whose orders are drinks, sorted by patience (most urgent first), and picks
+ * the first one whose drink type isn't already covered by the pipeline.
+ * Falls back to 'latte' if none found.
+ * @param {SimState} state
+ * @returns {DrinkItem}
+ */
+function pickDrinkToBrew(state) {
+  // Count drinks in the pipeline per type: brewing slots + current action's drinkType
+  /** @type {Map<DrinkItem, number>} */
+  const pipeline = new Map();
+  for (const slot of state.machine.slots) {
+    if (slot.state === 'brewing' && slot.drink) {
+      pipeline.set(slot.drink, (pipeline.get(slot.drink) ?? 0) + 1);
+    }
+  }
+  // Count the current brewStart action's committed drink type
+  if (state.owner.action?.kind === 'brewStart' && state.owner.action.claims.drinkType) {
+    const dt = state.owner.action.claims.drinkType;
+    pipeline.set(dt, (pipeline.get(dt) ?? 0) + 1);
+  }
+
+  // Collect waiting/approaching drink guests sorted by patience (most urgent first)
+  /** @type {{ drink: DrinkItem, patience: number }[]} */
+  const waitingDrinks = [];
+  for (const guest of state.guests) {
+    if (guest.state !== 'waiting' && guest.state !== 'walkingIn' && guest.state !== 'asking') continue;
+    const spec = specOf(state, guest.id);
+    if (isDrink(spec.order)) {
+      waitingDrinks.push({ drink: spec.order, patience: guest.patienceLeft });
+    }
+  }
+  waitingDrinks.sort((a, b) => a.patience - b.patience);
+
+  // Ready drinks count as covering only if a matching guest wants them
+  for (const slot of state.machine.slots) {
+    if (slot.state === 'ready' && slot.claimedBy === null && slot.drink) {
+      const wantingThis = waitingDrinks.filter((w) => w.drink === slot.drink).length;
+      const alreadyCovered = pipeline.get(slot.drink) ?? 0;
+      if (alreadyCovered < wantingThis) {
+        pipeline.set(slot.drink, alreadyCovered + 1);
+      }
+      // Else: dead drink on machine — don't count it
+    }
+  }
+
+  // Count how many of each drink are needed
+  /** @type {Map<DrinkItem, number>} */
+  const needed = new Map();
+  for (const { drink } of waitingDrinks) {
+    needed.set(drink, (needed.get(drink) ?? 0) + 1);
+  }
+
+  // Pick the most urgent guest's drink that still needs brewing
+  for (const { drink } of waitingDrinks) {
+    const need = needed.get(drink) ?? 0;
+    const have = pipeline.get(drink) ?? 0;
+    if (need > have) return drink;
+  }
+  // Fallback: latte (the default drink)
+  return 'latte';
 }
 
 /**
@@ -83,10 +154,16 @@ export function resolveTap(state, target) {
   const yes = (kind, guestId = null, tableId = null) => ({ ok: /** @type {const} */ (true), kind, guestId, tableId });
 
   switch (target.kind) {
-    case 'machine':
-      if (!state.machine.slots.some((s) => s.state === 'empty' && s.claimedBy === null)) return no('machineBusy');
-      if (!firstDishIn(state, 'rack')) return no('noCleanDish');
-      return yes('brewStart');
+    case 'machine': {
+      const hasEmpty = state.machine.slots.some((s) => s.state === 'empty' && s.claimedBy === null);
+      if (hasEmpty) {
+        if (!firstDishIn(state, 'rack')) return no('noCleanDish');
+        return yes('brewStart');
+      }
+      // No empty slot — but if a ready drink is unclaimed, discard it
+      if (state.machine.slots.some((s) => s.state === 'ready' && s.claimedBy === null)) return yes('discard');
+      return no('machineBusy');
+    }
     case 'case':
       if (state.pass.dishId !== null || state.pass.claimedBy !== null) return no('passFull');
       if (!firstDishIn(state, 'rack')) return no('noCleanDish');
@@ -108,6 +185,12 @@ export function resolveTap(state, target) {
       if (!table) return no('noSuchTable');
       return table.state === 'dirty' ? yes('wipe', null, table.id) : no('tableNotDirty');
     }
+    case 'oven': {
+      const oven = state.oven;
+      if (oven.state === 'ready' && oven.claimedBy === null) return yes('bakeUnload');
+      if (oven.state === 'empty' && oven.claimedBy === null) return yes('bakeLoad');
+      return no('ovenBusy');
+    }
     default:
       return no('unknownTarget');
   }
@@ -122,6 +205,7 @@ export function resolveTap(state, target) {
 function targetOf(state, queued) {
   switch (queued.kind) {
     case 'brewStart':
+    case 'discard':
       return { kind: 'machine' };
     case 'plate':
       return { kind: 'case' };
@@ -129,6 +213,9 @@ function targetOf(state, queued) {
       return { kind: 'sink' };
     case 'wipe':
       return queued.tableId === null ? null : { kind: 'table', tableId: queued.tableId };
+    case 'bakeLoad':
+    case 'bakeUnload':
+      return { kind: 'oven' };
     default: {
       const index = state.spots.indexOf(queued.guestId);
       return queued.guestId === null || index === -1 ? null : { kind: 'spot', index };
@@ -139,11 +226,17 @@ function targetOf(state, queued) {
 /**
  * @param {SimState} state
  * @param {OwnerActionKind} kind
+ * @param {DrinkItem | null} [drinkType]
  * @returns {number}
  */
-function workTicks(state, kind) {
+function workTicks(state, kind, drinkType = null) {
   const t = state.timing;
-  return kind === 'wash' ? t.washPerDish : t[kind];
+  if (kind === 'wash') return t.washPerDish;
+  if (kind === 'brewStart' && drinkType) {
+    // brewStart work time is always brewStart (loading), not brewing
+    return t.brewStart;
+  }
+  return t[kind];
 }
 
 /**
@@ -177,6 +270,7 @@ function releaseAction(state, action) {
       table.state = 'dirty';
     }
   }
+  if (c.oven) state.oven.claimedBy = null;
   state.owner.action = null;
 }
 
@@ -310,7 +404,7 @@ function startNextAction(state, emit) {
       ticksLeft: 0,
       zone: ZONE[queued.kind],
       reservedDishId: null,
-      claims: { guestId: null, slot: null, pass: false, tableId: null, sinkDishId: null },
+      claims: { guestId: null, slot: null, pass: false, tableId: null, sinkDishId: null, drinkType: null, oven: false },
     };
     if (queued.kind === 'brewStart' || queued.kind === 'plate') {
       const dish = /** @type {Dish} */ (firstDishIn(state, 'rack'));
@@ -320,10 +414,31 @@ function startNextAction(state, emit) {
         const slot = state.machine.slots.findIndex((s) => s.state === 'empty' && s.claimedBy === null);
         state.machine.slots[slot].claimedBy = action.id;
         action.claims.slot = slot;
+        // Determine which drink to brew: pick the first unserved drink guest whose order isn't already brewing/ready
+        action.claims.drinkType = pickDrinkToBrew(state);
       } else {
+        // Plating a croissant: check stock
+        if (state.pastryStock.display <= 0) {
+          // Release the reserved dish and skip — can't plate without stock
+          dish.holder = { kind: 'rack' };
+          action.reservedDishId = null;
+          emit('actionDropped', { actionId: queued.id, kind: queued.kind, reason: 'noStock' });
+          continue;
+        }
         state.pass.claimedBy = action.id;
         action.claims.pass = true;
       }
+    } else if (queued.kind === 'discard') {
+      const slot = state.machine.slots.findIndex((s) => s.state === 'ready' && s.claimedBy === null);
+      if (slot === -1) {
+        emit('actionDropped', { actionId: queued.id, kind: queued.kind, reason: 'nothingToDiscard' });
+        continue;
+      }
+      state.machine.slots[slot].claimedBy = action.id;
+      action.claims.slot = slot;
+    } else if (queued.kind === 'bakeLoad' || queued.kind === 'bakeUnload') {
+      state.oven.claimedBy = action.id;
+      action.claims.oven = true;
     } else if (queued.kind === 'handOver' || queued.kind === 'answer') {
       const guest = /** @type {LiveGuest} */ (state.guests.find((g) => g.id === queued.guestId));
       guest.attendedBy = action.id;
@@ -368,13 +483,19 @@ function completeAction(state, action, emit, freshBrews) {
       const slotIndex = /** @type {number} */ (c.slot);
       const slot = state.machine.slots[slotIndex];
       const dishId = /** @type {number} */ (action.reservedDishId);
+      const drinkType = c.drinkType ?? 'latte';
       dishOf(state, dishId).holder = { kind: 'machine', slot: slotIndex }; // D2
       slot.state = 'brewing';
       slot.dishId = dishId;
-      slot.ticksLeft = state.timing.brew;
+      slot.drink = drinkType;
+      // Drink-specific brew times
+      const brewTime = drinkType === 'espresso' ? state.timing.brewEspresso
+        : drinkType === 'mocha' ? state.timing.brewMocha
+        : state.timing.brew; // latte uses default brew
+      slot.ticksLeft = brewTime;
       slot.claimedBy = null;
       freshBrews.add(slotIndex);
-      emit('brewStarted', { slot: slotIndex });
+      emit('brewStarted', { slot: slotIndex, drink: drinkType });
       break;
     }
     case 'plate': {
@@ -382,7 +503,38 @@ function completeAction(state, action, emit, freshBrews) {
       dishOf(state, dishId).holder = { kind: 'pass' }; // D3
       state.pass.dishId = dishId;
       state.pass.claimedBy = null;
-      emit('croissantPlated');
+      // Consume one pastry from display stock
+      state.pastryStock.display -= 1;
+      emit('croissantPlated', { stockLeft: state.pastryStock.display });
+      break;
+    }
+    case 'discard': {
+      const slotIndex = /** @type {number} */ (c.slot);
+      const slot = state.machine.slots[slotIndex];
+      const dishId = /** @type {number} */ (slot.dishId);
+      dishOf(state, dishId).holder = { kind: 'sink' }; // Discard: dish goes to sink
+      slot.state = 'empty';
+      slot.dishId = null;
+      slot.drink = null;
+      slot.ticksLeft = 0;
+      slot.claimedBy = null;
+      emit('drinkDiscarded', { slot: slotIndex });
+      break;
+    }
+    case 'bakeLoad': {
+      state.oven.state = 'baking';
+      state.oven.ticksLeft = state.timing.bake;
+      state.oven.claimedBy = null;
+      emit('bakeStarted');
+      break;
+    }
+    case 'bakeUnload': {
+      const added = Math.min(CONFIG.pastryBatchSize, state.pastryStock.maxDisplay - state.pastryStock.display);
+      state.pastryStock.display += added;
+      state.oven.state = 'empty';
+      state.oven.ticksLeft = 0;
+      state.oven.claimedBy = null;
+      emit('bakeUnloaded', { added, stockNow: state.pastryStock.display });
       break;
     }
     case 'handOver': {
@@ -395,6 +547,7 @@ function completeAction(state, action, emit, freshBrews) {
         dishId = /** @type {number} */ (slot.dishId); // D5
         slot.state = 'empty';
         slot.dishId = null;
+        slot.drink = null;
         slot.claimedBy = null;
       } else {
         dishId = /** @type {number} */ (state.pass.dishId); // D6
@@ -477,6 +630,23 @@ function stepOwner(state, emit, freshBrews) {
     }
   }
   if (owner.action === null) startNextAction(state, emit);
+}
+
+/**
+ * Steps the oven's background baking timer. Baking runs independently of the owner.
+ * @param {SimState} state
+ * @param {Emit} emit
+ * @param {boolean} freshBake True if bakeLoad completed this tick (skip first tick).
+ */
+function stepOven(state, emit, freshBake) {
+  const oven = state.oven;
+  if (oven.state !== 'baking' || freshBake) return;
+  oven.ticksLeft -= 1;
+  if (oven.ticksLeft <= 0) {
+    oven.ticksLeft = 0;
+    oven.state = 'ready';
+    emit('bakeReady');
+  }
 }
 
 /**
@@ -617,9 +787,14 @@ function endShift(state, emit) {
     if (slot.dishId !== null) dishOf(state, slot.dishId).holder = { kind: 'rack' };
     slot.state = 'empty';
     slot.dishId = null;
+    slot.drink = null;
     slot.ticksLeft = 0;
     slot.claimedBy = null;
   }
+  // Clear oven
+  state.oven.state = 'empty';
+  state.oven.ticksLeft = 0;
+  state.oven.claimedBy = null;
   if (state.pass.dishId !== null) dishOf(state, state.pass.dishId).holder = { kind: 'rack' };
   state.pass.dishId = null;
   state.pass.claimedBy = null;
@@ -665,8 +840,12 @@ export function step(state, commands = []) {
   for (const command of commands) applyCommand(state, command, emit); // 1
   /** @type {Set<number>} */
   const freshBrews = new Set();
+  const ovenWasBaking = state.oven.state === 'baking';
   stepOwner(state, emit, freshBrews); // 2
+  // freshBake = oven just switched from non-baking to baking on this tick
+  const freshBake = !ovenWasBaking && state.oven.state === 'baking';
   stepMachine(state, emit, freshBrews); // 3
+  stepOven(state, emit, freshBake); // 3b
   stepGuests(state, emit); // 4
   promoteFromDoor(state, emit); // 5
   if (state.phase === 'open') admitArrivals(state, emit); // 6

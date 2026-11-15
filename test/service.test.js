@@ -6,7 +6,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CONFIG, createInitialState, digest, replay, step } from '../src/sim/index.js';
+import { CONFIG, createInitialState, digest, isDrink, replay, step } from '../src/sim/index.js';
 import { createService, itemReady } from '../src/ui/service.js';
 import { counter } from './support/counter.js';
 import { scene } from './support/scene.js';
@@ -208,11 +208,15 @@ test('the interface state never changes the simulation, and its commands replay 
         const to = cards.findIndex((card, i) => i < 3 && card?.kind === 'order' && card.order === carrying && card.status === 'ready');
         if (to >= 0) c.spot(to);
         else service.putBack();
-      } else if (ready >= 0) c.station(cards[ready]?.order === 'latte' ? 'machine' : 'case');
+      } else if (ready >= 0) c.station(isDrink(cards[ready]?.order ?? '') ? 'machine' : 'case');
       else if (asking >= 0) c.spot(asking);
       else if (fresh >= 0 && state.owner.queue.length === 0) {
-        c.spot(fresh);
-        c.station(cards[fresh]?.order === 'latte' ? 'machine' : 'case');
+        const isFreshDrink = isDrink(cards[fresh]?.order ?? '');
+        const machineAvailable = !isFreshDrink || state.machine.slots.some((s) => s.state === 'empty' || (s.state === 'ready' && s.claimedBy === null));
+        if (machineAvailable) {
+          c.spot(fresh);
+          c.station(isFreshDrink ? 'machine' : 'case');
+        }
       }
     }
     c.tick();

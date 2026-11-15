@@ -58,6 +58,12 @@ export function actionName(kind, tableId = null) {
       return 'Answer';
     case 'wipe':
       return tableId === null ? 'Wipe table' : `Wipe table ${tableId}`;
+    case 'discard':
+      return 'Discard drink';
+    case 'bakeLoad':
+      return 'Load oven';
+    case 'bakeUnload':
+      return 'Unload oven';
     default:
       return 'Wash dishes';
   }
@@ -101,6 +107,10 @@ export function describeTarget(state, target) {
       }
       const doing = guest.state === 'walkingIn' ? 'walking in, wants' : 'waiting for';
       return `${name}: guest ${doing} a ${spec.order}, ${patience}. ${outcome}`;
+    }
+    case 'oven': {
+      const oven = state.oven;
+      return `Oven: ${oven.state}. ${outcome}`;
     }
     default: {
       const table = state.tables.find((t) => t.id === target.tableId);

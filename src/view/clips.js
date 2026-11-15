@@ -81,14 +81,14 @@ export function clothAt(tableId, progress) {
  * @property {'idle' | 'walk' | 'brew' | 'plate' | 'serve' | 'answer' | 'wash' | 'wipe'} kind
  * @property {OwnerAction['kind'] | null} action The action being travelled to or worked on.
  * @property {number} progress 0-1 of the current phase.
- * @property {'latte' | 'croissant' | 'cup' | 'cloth' | null} item What the owner holds.
+ * @property {import('../sim/types.js').OrderItem | 'cup' | 'cloth' | null} item What the owner holds.
  * @property {number | null} guestId
  * @property {number | null} tableId
  * @property {{ x: number, y: number, facing: number } | null} target Where the action happens.
  */
 
 /** @type {Readonly<Record<OwnerActionKind, OwnerClip['kind']>>} */
-const WORK = { brewStart: 'brew', plate: 'plate', handOver: 'serve', answer: 'answer', wash: 'wash', wipe: 'wipe' };
+const WORK = { brewStart: 'brew', plate: 'plate', handOver: 'serve', answer: 'answer', wash: 'wash', wipe: 'wipe', bakeLoad: 'brew', bakeUnload: 'plate', discard: 'brew' };
 /** @typedef {OwnerAction['kind']} OwnerActionKind */
 
 /**
@@ -104,6 +104,12 @@ export function actionTarget(state, action) {
       return { ...STAGE.owner.case, y: STAGE.behindY };
     case 'wash':
       return { ...STAGE.owner.sink, y: STAGE.behindY };
+    case 'bakeLoad':
+    case 'bakeUnload':
+      // Oven is near the machine area for now
+      return { ...STAGE.owner.machine, y: STAGE.behindY };
+    case 'discard':
+      return { ...STAGE.owner.machine, y: STAGE.behindY };
     case 'wipe': {
       const tableId = action.claims.tableId ?? 1;
       const progress = action.phase === 'working' ? 1 - action.ticksLeft / state.timing.wipe : 0;
@@ -125,7 +131,9 @@ export function ownerClip(state) {
   const action = state.owner.action;
   if (!action) return { kind: 'idle', action: null, progress: 0, item: null, guestId: null, tableId: null, target: null };
   const t = state.timing;
-  const total = action.phase === 'travelling' ? t.travel : action.kind === 'wash' ? t.washPerDish : t[action.kind];
+  const total = action.phase === 'travelling' ? t.travel
+    : action.kind === 'wash' ? t.washPerDish
+    : t[action.kind] ?? t.travel;
   const progress = Math.max(0, Math.min(1, 1 - action.ticksLeft / total));
   /** @type {OwnerClip['item']} */
   let item = null;

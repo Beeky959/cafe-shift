@@ -5,7 +5,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { TICKS_PER_SECOND, createInitialState, digest } from '../src/sim/index.js';
+import { TICKS_PER_SECOND, createInitialState, digest, isDrink } from '../src/sim/index.js';
 import { createByte } from '../src/ui/byte.js';
 import { counter } from './support/counter.js';
 import { scene } from './support/scene.js';
@@ -73,7 +73,7 @@ test('urgency: Byte names the ticket and what is wrong with it', () => {
   // Nothing made: the line says so.
   const idle = counter(scene([{ at: 0 }]));
   const idleLines = listen(idle);
-  idle.wait(660 - 4 * TICKS_PER_SECOND);
+  idle.wait(720 - 4 * TICKS_PER_SECOND);
   assert.ok(idleLines.some((l) => l.text === 'Ticket 1 is nearly out of patience and nothing is being made for them.' && l.urgent));
 
   // Made but not delivered: a different line.
@@ -82,7 +82,7 @@ test('urgency: Byte names the ticket and what is wrong with it', () => {
   ready.until('guestWaiting');
   ready.spot(0);
   ready.station('machine');
-  ready.wait(660 - 4 * TICKS_PER_SECOND);
+  ready.wait(720 - 4 * TICKS_PER_SECOND);
   assert.ok(readyLines.some((l) => l.text === "Ticket 1's latte is ready and they are about to leave. Carry it over!"));
   assert.equal(readyLines.filter((l) => l.text.includes('about to leave')).length, 1, 'said once, not repeated');
 
@@ -150,12 +150,20 @@ test('over a whole shift Byte speaks sparingly, never twice within 2.5 s unless 
         const to = at((card) => card.kind === 'order' && card.order === carrying && card.status === 'ready');
         if (to >= 0) c.spot(to);
         else c.service.putBack();
-      } else if (ready >= 0) c.station(cards[ready]?.order === 'latte' ? 'machine' : 'case');
+      } else if (ready >= 0) c.station(isDrink(cards[ready]?.order ?? '') ? 'machine' : 'case');
       else if (clean <= 1 && dirty > 0 && !washing) c.tap({ kind: 'sink' });
       else if (asking >= 0) c.spot(asking);
       else if (fresh >= 0 && clean > 0) {
-        c.spot(fresh);
-        c.station(cards[fresh]?.order === 'latte' ? 'machine' : 'case');
+        const isFreshDrink = isDrink(cards[fresh]?.order ?? '');
+        const hasEmpty = c.state.machine.slots.some((s) => s.state === 'empty' && s.claimedBy === null);
+        if (!isFreshDrink || hasEmpty) {
+          c.spot(fresh);
+          c.station(isFreshDrink ? 'machine' : 'case');
+        } else if (isFreshDrink && c.state.machine.slots.some((s) => s.state === 'ready' && s.claimedBy === null)) {
+          // Machine has a ready drink nobody wants — discard it by tapping machine
+          c.tap({ kind: 'machine' });
+        }
+        // else machine is brewing — wait
       } else if (dirtyTable && c.state.owner.action === null) c.tap({ kind: 'table', tableId: dirtyTable.id });
       else if (dirty > 0 && c.state.owner.action === null) c.tap({ kind: 'sink' });
     }

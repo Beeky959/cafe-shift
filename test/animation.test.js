@@ -71,8 +71,8 @@ test('every owner clip matches the action and phase, and progress is the action 
     if (!a) return assert.equal(clip.kind, 'idle');
     seen.add(clip.kind);
     if (a.phase === 'travelling') assert.equal(clip.kind, 'walk');
-    else assert.equal(clip.kind, { brewStart: 'brew', plate: 'plate', handOver: 'serve', answer: 'answer', wash: 'wash', wipe: 'wipe' }[a.kind]);
-    const total = a.phase === 'travelling' ? d.state.timing.travel : a.kind === 'wash' ? d.state.timing.washPerDish : d.state.timing[a.kind];
+    else assert.equal(clip.kind, { brewStart: 'brew', plate: 'plate', handOver: 'serve', answer: 'answer', wash: 'wash', wipe: 'wipe', bakeLoad: 'brew', bakeUnload: 'plate', discard: 'brew' }[a.kind]);
+    const total = a.phase === 'travelling' ? d.state.timing.travel : a.kind === 'wash' ? d.state.timing.washPerDish : (d.state.timing[a.kind] ?? d.state.timing.travel);
     assert.equal(clip.progress, Math.max(0, Math.min(1, 1 - a.ticksLeft / total)));
   };
   const run = (/** @type {number} */ n) => {

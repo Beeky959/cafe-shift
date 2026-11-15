@@ -3,8 +3,8 @@
  * Scripted players for the balance gates (docs/BUILD_PLAN.md §3). They read
  * the state and issue taps, exactly as a person would; they never change it.
  */
-/** @import { SimState, Command, Target, LiveGuest } from '../../src/sim/types.js' */
-import { CONFIG, TICKS_PER_SECOND, resolveTap } from '../../src/sim/index.js';
+/** @import { SimState, Command, Target, LiveGuest, OrderItem } from '../../src/sim/types.js' */
+import { CONFIG, TICKS_PER_SECOND, resolveTap, isDrink } from '../../src/sim/index.js';
 
 /** @typedef {'idle' | 'arrivalOrder' | 'priority' | 'fastPriority'} PlayerKind */
 
@@ -18,7 +18,7 @@ export const PLAYER_INTERVAL_SECONDS = /** @type {Readonly<Record<PlayerKind, nu
 
 /**
  * @param {SimState} state
- * @returns {{ guest: LiveGuest, index: number, order: 'latte' | 'croissant' }[]} Guests at the counter, oldest first.
+ * @returns {{ guest: LiveGuest, index: number, order: OrderItem }[]} Guests at the counter, oldest first.
  */
 function atCounter(state) {
   const out = [];
@@ -52,9 +52,12 @@ function arrivalOrder(state) {
   }
   const spot = /** @type {Target} */ ({ kind: 'spot', index: oldest.index });
   if (oldest.guest.state === 'asking') return spot;
-  if (oldest.order === 'latte') {
-    if (state.machine.slots.some((s) => s.state === 'ready')) return spot;
+  if (isDrink(oldest.order)) {
+    // Check if a matching drink is ready (drink type must match)
+    if (state.machine.slots.some((s) => s.state === 'ready' && s.claimedBy === null && s.drink === oldest.order)) return spot;
+    // If machine is busy or a different drink is brewing, wait
     if (state.machine.slots.some((s) => s.state === 'brewing')) return null;
+    // Start a new brew
     return cleanDishes(state) > 0 ? { kind: 'machine' } : dirtyDishes(state) > 0 ? { kind: 'sink' } : null;
   }
   if (state.pass.dishId !== null) return spot;
@@ -76,7 +79,7 @@ function priority(state) {
   const options = [];
   const counter = atCounter(state);
   const wanting = counter.filter((c) => c.guest.state === 'waiting' || c.guest.state === 'walkingIn');
-  /** @param {'latte' | 'croissant'} order */
+  /** @param {OrderItem} order */
   const leastPatient = (order) =>
     wanting.filter((c) => c.order === order).sort((a, b) => a.guest.patienceLeft - b.guest.patienceLeft)[0];
   const dirtyTable = state.tables.find((tb) => tb.state === 'dirty');
@@ -86,14 +89,16 @@ function priority(state) {
   for (const c of counter) {
     const spot = /** @type {Target} */ ({ kind: 'spot', index: c.index });
     if (c.guest.state === 'waiting') {
-      // Hand over anything that is ready: quick, earns now, frees the machine.
-      const urgency = -100000 + c.guest.patienceLeft;
-      options.push({ target: spot, urgency });
-      // A guest who would have to stand leaves no tip. Wipe first when that
-      // still leaves them served with more than half their patience.
+      // Only push hand-over if the matching item is actually ready
       const ready = resolveTap(state, spot).ok;
-      if (ready && noneClean && dirtyTable && c.guest.patienceLeft - wipeCost - t.handOver > t.counterPatience * CONFIG.tipPatienceFraction + 15) {
-        options.push({ target: { kind: 'table', tableId: dirtyTable.id }, urgency: urgency - 1 });
+      if (ready) {
+        const urgency = -100000 + c.guest.patienceLeft;
+        options.push({ target: spot, urgency });
+        // A guest who would have to stand leaves no tip. Wipe first when that
+        // still leaves them served with more than half their patience.
+        if (noneClean && dirtyTable && c.guest.patienceLeft - wipeCost - t.handOver > t.counterPatience * CONFIG.tipPatienceFraction + 15) {
+          options.push({ target: { kind: 'table', tableId: dirtyTable.id }, urgency: urgency - 1 });
+        }
       }
     } else if (c.guest.state === 'asking') {
       options.push({ target: spot, urgency: c.guest.patienceLeft });
@@ -102,24 +107,72 @@ function priority(state) {
       }
     }
   }
-  // Start a drink when more are wanted than are on the way.
-  const lattesWanted = wanting.filter((c) => c.order === 'latte').length;
-  const lattesComing =
-    state.machine.slots.filter((s) => s.state !== 'empty').length + (state.owner.action?.kind === 'brewStart' ? 1 : 0);
-  const latteGuest = leastPatient('latte');
-  if (latteGuest && lattesWanted > lattesComing) {
-    options.push({ target: { kind: 'machine' }, urgency: latteGuest.guest.patienceLeft - t.brew - 400 });
+  // Start a drink when more are wanted than are effectively covered.
+  // Count per-type: brewing counts, ready counts only if a matching guest exists.
+  const drinkGuests = wanting.filter((c) => isDrink(c.order)).sort((a, b) => a.guest.patienceLeft - b.guest.patienceLeft);
+  if (drinkGuests.length > 0) {
+    /** @type {Map<string, number>} */
+    const neededByType = new Map();
+    for (const c of drinkGuests) neededByType.set(c.order, (neededByType.get(c.order) ?? 0) + 1);
+    /** @type {Map<string, number>} */
+    const coveredByType = new Map();
+    for (const s of state.machine.slots) {
+      if (s.state === 'brewing' && s.drink) {
+        coveredByType.set(s.drink, (coveredByType.get(s.drink) ?? 0) + 1);
+      } else if (s.state === 'ready' && s.claimedBy === null && s.drink) {
+        // Only count ready drinks as covered if there's a matching waiting guest
+        const wantThis = neededByType.get(s.drink) ?? 0;
+        const alreadyCovered = coveredByType.get(s.drink) ?? 0;
+        if (alreadyCovered < wantThis) {
+          coveredByType.set(s.drink, alreadyCovered + 1);
+        }
+      }
+    }
+    if (state.owner.action?.kind === 'brewStart' && state.owner.action.claims.drinkType) {
+      const dt = state.owner.action.claims.drinkType;
+      coveredByType.set(dt, (coveredByType.get(dt) ?? 0) + 1);
+    }
+    let totalNeeded = 0;
+    let totalCovered = 0;
+    for (const [type, need] of neededByType) {
+      totalNeeded += need;
+      totalCovered += Math.min(need, coveredByType.get(type) ?? 0);
+    }
+    if (totalNeeded > totalCovered) {
+      // Check if machine is blocked by a dead drink (ready but no matching guest)
+      const machineBlocked = !state.machine.slots.some((s) => s.state === 'empty' && s.claimedBy === null);
+      const hasDeadDrink = state.machine.slots.some((s) => {
+        if (s.state !== 'ready' || s.claimedBy !== null || !s.drink) return false;
+        return (neededByType.get(s.drink) ?? 0) <= (coveredByType.get(s.drink) ?? 0);
+      });
+      if (machineBlocked && hasDeadDrink) {
+        // Discard the dead drink to make room
+        options.push({ target: { kind: 'machine' }, urgency: drinkGuests[0].guest.patienceLeft - t.brew - 500 });
+      } else {
+        options.push({ target: { kind: 'machine' }, urgency: drinkGuests[0].guest.patienceLeft - t.brew - 400 });
+      }
+    }
   }
   const croissantGuest = leastPatient('croissant');
-  if (croissantGuest && state.pass.dishId === null && state.owner.action?.kind !== 'plate') {
+  if (croissantGuest && state.pass.dishId === null && state.owner.action?.kind !== 'plate' && state.pastryStock.display > 0) {
     options.push({ target: { kind: 'case' }, urgency: croissantGuest.guest.patienceLeft - 200 });
+  }
+  // Load oven when pastry stock is getting low and oven is empty
+  if (state.oven.state === 'empty' && state.oven.claimedBy === null && state.pastryStock.display <= 2) {
+    // More urgent when stock is critically low
+    const ovenUrgency = state.pastryStock.display === 0 ? -50 : state.pastryStock.display === 1 ? 200 : 400;
+    options.push({ target: { kind: 'oven' }, urgency: ovenUrgency });
+  }
+  // Unload oven when ready — fairly urgent to restock
+  if (state.oven.state === 'ready' && state.oven.claimedBy === null) {
+    options.push({ target: { kind: 'oven' }, urgency: state.pastryStock.display === 0 ? -50 : 100 });
   }
   // Upkeep: urgent when it is about to block service, background otherwise.
   // Background jobs are not started while a guest is close to leaving, or when
   // a drink someone is waiting for is about to be ready.
   const someoneUrgent = counter.some((c) => c.guest.attendedBy === null && c.guest.patienceLeft < 8 * TICKS_PER_SECOND);
   const drinkAlmostReady =
-    wanting.some((c) => c.order === 'latte') && state.machine.slots.some((s) => s.state === 'brewing' && s.ticksLeft <= 36);
+    wanting.some((c) => isDrink(c.order)) && state.machine.slots.some((s) => s.state === 'brewing' && s.ticksLeft <= 36);
   const background = !someoneUrgent && !drinkAlmostReady;
   if (dirtyDishes(state) > 0) {
     const clean = cleanDishes(state);
