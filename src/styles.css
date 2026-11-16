@@ -233,6 +233,7 @@ button:focus-visible { outline: 4px solid #72a6ff; outline-offset: 2px; }
 
 .stat.questions { border-color: #2f6fb0; background: #dff0ff; }
 .stat.questions .stat-label { color: #1f4f85; }
+#hud-waiting[data-warn='yes'] { color: #b4483d; font-weight: 900; }
 
 .stat strong.bump { animation: bump 0.4s ease-out; }
 @keyframes bump { 30% { transform: scale(1.35); color: #2f7d2a; } }

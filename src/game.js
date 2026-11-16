@@ -47,7 +47,58 @@ const DRAG_THRESHOLD = 24;
 /** @type {readonly Upgrade[]} */
 const UPGRADES = Object.freeze([
   { id: 'tapit-stand', name: 'TapIt Stand', desc: 'Guests answer their own digital questions at a kiosk — no more counter delays.', cost: 80 },
+  { id: 'espresso-upgrade', name: 'Espresso Express', desc: 'A faster machine — brewing takes 20% less time.', cost: 60 },
+  { id: 'pastry-warmer', name: 'Pastry Warmer', desc: 'Pre-warmed pastries — pastry prep takes 20% less time.', cost: 50 },
 ]);
+
+// ---- localStorage save/load ----
+const SAVE_KEY = 'cafe-shift-progress';
+const SAVE_VERSION = 1;
+
+/**
+ * @typedef {object} SaveData
+ * @property {number} version
+ * @property {number} wallet
+ * @property {string[]} purchased
+ * @property {number[]} completedMissions
+ */
+
+/** @returns {SaveData | null} */
+function loadProgress() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== 'object') return null;
+    if (data.version !== SAVE_VERSION) {
+      // Future: migrate from older versions. For now, treat as corrupt.
+      return null;
+    }
+    if (typeof data.wallet !== 'number' || !Array.isArray(data.purchased) || !Array.isArray(data.completedMissions)) return null;
+    // Validate types
+    if (!data.purchased.every(/** @param {unknown} x */ (x) => typeof x === 'string')) return null;
+    if (!data.completedMissions.every(/** @param {unknown} x */ (x) => typeof x === 'number')) return null;
+    return /** @type {SaveData} */ (data);
+  } catch {
+    return null;
+  }
+}
+
+/** @param {number} wallet @param {Set<string>} purchased @param {Set<number>} completedMissions */
+function saveProgress(wallet, purchased, completedMissions) {
+  try {
+    /** @type {SaveData} */
+    const data = {
+      version: SAVE_VERSION,
+      wallet,
+      purchased: [...purchased],
+      completedMissions: [...completedMissions],
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  } catch {
+    // localStorage full or unavailable — game still works, just no persistence.
+  }
+}
 
 /**
  * @param {object} deps
@@ -57,17 +108,21 @@ const UPGRADES = Object.freeze([
  * @param {boolean} [deps.reducedMotion] The player asked their device for less motion.
  */
 export function createGame({ seed, ui, draw, reducedMotion = false }) {
+  // Load saved progress or start fresh
+  const saved = loadProgress();
   /** Coins that carry over between shifts. */
-  let wallet = 0;
+  let wallet = saved ? saved.wallet : 0;
   /** Upgrades purchased across shifts. */
   /** @type {Set<string>} */
-  const purchased = new Set();
+  const purchased = new Set(saved ? saved.purchased : []);
   /** Which mission indices the player has completed. */
   /** @type {Set<number>} */
-  const completedMissions = new Set();
+  const completedMissions = new Set(saved ? saved.completedMissions : []);
   /** Index into MISSIONS for the current or last-played mission (null = free play / intro). */
   /** @type {number | null} */
   let currentMission = null;
+  /** Whether the last-completed mission was passed. Used by the overlay button to decide retry vs continue. */
+  let lastMissionPassed = false;
 
   /** @type {SimState} */
   let state = createInitialState({ seed });
@@ -140,15 +195,18 @@ export function createGame({ seed, ui, draw, reducedMotion = false }) {
       const done = completedMissions.has(i);
       // Mission 0 is always available; others unlock when the previous one is completed.
       const unlocked = i === 0 || completedMissions.has(i - 1);
+      const rewardText = done ? '' : ` · Reward: ${m.reward} coins`;
       return {
         label: `${i + 1}. ${m.name}`,
-        sublabel: m.desc,
+        sublabel: `${m.desc}${rewardText}`,
         status: /** @type {'locked' | 'available' | 'completed'} */ (done ? 'completed' : unlocked ? 'available' : 'locked'),
       };
     });
+    const clearedCount = completedMissions.size;
+    const totalCount = MISSIONS.length;
     ui.showOverlay({
       title: 'Choose a Mission',
-      lines: [`Wallet: ${wallet} coins.`],
+      lines: [`Progress: ${clearedCount}/${totalCount} cleared  ·  Wallet: ${wallet} coins`],
       button: 'Free Play',
       items,
     });
@@ -158,64 +216,116 @@ export function createGame({ seed, ui, draw, reducedMotion = false }) {
     const g = state.metrics.guests;
     const earned = state.economy.grossEarnings;
     wallet += earned;
+    const totalArrived = state.nextArrivalIndex;
+    const lostCount = g.leftUnhappy + g.walkedPast;
     const answerSeconds = Math.round((state.metrics.ownerTicks.answer / TICKS_PER_SECOND) * 10) / 10;
     /** @type {string[]} */
-    const lines = [
-      `${g.leftHappy} of ${state.schedule.length} guests left happy.`,
-      `${earned} coins earned, including ${state.metrics.tips} tip${state.metrics.tips === 1 ? '' : 's'}.`,
-      `You answered ${questionsAnswered} question${questionsAnswered === 1 ? '' : 's'} yourself: ${answerSeconds} s away from the counter.`,
-      `Score: ${state.economy.score}. Wallet: ${wallet} coins.`,
-    ];
+    const lines = [];
+
+    // --- Shift stats breakdown ---
+    lines.push(`Arrived: ${totalArrived}  ·  Served: ${g.served}  ·  Lost: ${lostCount}`);
+    lines.push(`Revenue: ${earned} coins (${state.metrics.tips} tip${state.metrics.tips === 1 ? '' : 's'})`);
+    lines.push(`Questions answered: ${questionsAnswered} (${answerSeconds}s away)`);
+
     let title = 'Shift over';
+    /** @type {boolean} */
+    let missionPassed = false;
+    /** @type {boolean} */
+    let missionFailed = false;
+
     if (currentMission !== null) {
       const mission = MISSIONS[currentMission];
-      const results = mission.objectives.map((obj) => ({ label: obj.label, pass: obj.check(state) }));
-      const allPassed = results.every((r) => r.pass);
-      if (allPassed) {
+
+      // Check failure conditions first
+      const failResults = (mission.failConditions ?? []).map((fc) => ({ label: fc.label, failed: fc.check(state) }));
+      missionFailed = failResults.some((r) => r.failed);
+
+      // Check success objectives
+      const objResults = mission.objectives.map((obj) => ({ label: obj.label, pass: obj.check(state) }));
+      const allObjectivesPassed = objResults.every((r) => r.pass);
+
+      missionPassed = allObjectivesPassed && !missionFailed;
+
+      if (missionPassed) {
+        const firstClear = !completedMissions.has(currentMission);
         completedMissions.add(currentMission);
+        if (firstClear) {
+          wallet += mission.reward;
+          lines.push('');
+          lines.push(`🎉 First clear bonus: +${mission.reward} coins!`);
+        }
         title = `✓ ${mission.name} — Complete!`;
+      } else if (missionFailed) {
+        title = `✗ ${mission.name} — Failed`;
       } else {
         title = `${mission.name} — Not quite`;
       }
-      lines.push(''); // visual separator
-      for (const r of results) {
+
+      lines.push('');
+      lines.push('— Objectives —');
+      for (const r of objResults) {
         lines.push(`${r.pass ? '✓' : '✗'} ${r.label}`);
       }
+      if (failResults.length > 0) {
+        lines.push('');
+        lines.push('— Fail Conditions —');
+        for (const r of failResults) {
+          lines.push(`${r.failed ? '✗ FAILED:' : '✓'} ${r.label}`);
+        }
+      }
     }
-    ui.showOverlay({ title, lines, button: 'Continue' });
+
+    lines.push('');
+    lines.push(`Wallet: ${wallet} coins.`);
+
+    lastMissionPassed = missionPassed;
+
+    // Save after wallet/completion updates
+    saveProgress(wallet, purchased, completedMissions);
+
+    // Button: retry if failed, continue if passed
+    const isMission = currentMission !== null;
+    const button = isMission && !missionPassed ? 'Retry' : 'Continue';
+    ui.showOverlay({ title, lines, button });
   }
 
   function showShop() {
     setPhase('shop');
     const available = UPGRADES.filter((u) => !purchased.has(u.id));
-    const lines = available.length === 0
-      ? [`All upgrades purchased! Wallet: ${wallet} coins.`]
-      : available.map((u) => {
-          const affordable = wallet >= u.cost;
-          return `${u.name} — ${u.cost} coins ${affordable ? '✓' : '(need ' + (u.cost - wallet) + ' more)'}. ${u.desc}`;
-        });
-    lines.push(`Wallet: ${wallet} coins.`);
+    const lines = [`Wallet: ${wallet} coins.`];
+    if (available.length === 0) {
+      lines.unshift('All upgrades purchased!');
+    }
+    /** @type {{ label: string, sublabel: string, status: 'locked' | 'available' | 'completed' }[] | undefined} */
+    const items = available.length > 0
+      ? available.map((u) => ({
+          label: `${u.name} — ${u.cost} coins`,
+          sublabel: u.desc,
+          status: /** @type {'locked' | 'available' | 'completed'} */ (wallet >= u.cost ? 'available' : 'locked'),
+        }))
+      : undefined;
     ui.showOverlay({
       title: 'Upgrade Shop',
       lines,
-      button: available.length > 0 && wallet >= available[0].cost ? `Buy ${available[0].name}` : 'Start next shift',
+      button: 'Next Mission',
+      items,
     });
   }
 
   /**
-   * Buy the first affordable unpurchased upgrade from the shop.
+   * Buy a specific upgrade by its index in the available (unpurchased) list.
+   * @param {number} index Index into the filtered available upgrades.
    * @returns {boolean} Whether something was bought.
    */
-  function buyNextUpgrade() {
-    for (const u of UPGRADES) {
-      if (purchased.has(u.id)) continue;
-      if (wallet >= u.cost) {
-        wallet -= u.cost;
-        purchased.add(u.id);
-        return true;
-      }
-    }
-    return false;
+  function buyUpgrade(index) {
+    const available = UPGRADES.filter((u) => !purchased.has(u.id));
+    if (index < 0 || index >= available.length) return false;
+    const u = available[index];
+    if (wallet < u.cost) return false;
+    wallet -= u.cost;
+    purchased.add(u.id);
+    saveProgress(wallet, purchased, completedMissions);
+    return true;
   }
 
   /** Byte's caption mood, as a face. @type {Readonly<Record<Mood, import('./view/animator.js').ByteExpression>>} */
@@ -329,9 +439,24 @@ export function createGame({ seed, ui, draw, reducedMotion = false }) {
    */
   function start(missionIndex = null) {
     currentMission = missionIndex;
+    lastMissionPassed = false;
     const preset = purchased.has('tapit-stand') ? 'test-stand' : 'none';
     const shiftId = missionIndex !== null ? MISSIONS[missionIndex].shiftId : 'slice';
     state = createInitialState({ seed, shiftId, preset });
+
+    // Apply upgrade effects to timing
+    if (purchased.has('espresso-upgrade')) {
+      // 20% faster brew times (fewer ticks, rounded down but at least 1)
+      state.timing.brew = Math.max(1, Math.round(state.timing.brew * 0.8));
+      state.timing.brewEspresso = Math.max(1, Math.round(state.timing.brewEspresso * 0.8));
+      state.timing.brewMocha = Math.max(1, Math.round(state.timing.brewMocha * 0.8));
+    }
+    if (purchased.has('pastry-warmer')) {
+      // 20% faster pastry operations
+      state.timing.bakeLoad = Math.max(1, Math.round(state.timing.bakeLoad * 0.8));
+      state.timing.bake = Math.max(1, Math.round(state.timing.bake * 0.8));
+      state.timing.bakeUnload = Math.max(1, Math.round(state.timing.bakeUnload * 0.8));
+    }
     pending = [];
     commandLog = [];
     service = createService();
@@ -509,15 +634,36 @@ export function createGame({ seed, ui, draw, reducedMotion = false }) {
 
     overlayButton() {
       if (phase === 'paused') togglePause();
-      else if (phase === 'ended') showShop();
-      else if (phase === 'shop') {
-        if (buyNextUpgrade()) showShop(); // Bought something — show updated shop.
-        else showMissionSelect(); // Nothing to buy — pick next mission.
+      else if (phase === 'ended') {
+        // After a mission: retry goes back to the same mission, continue goes to shop.
+        if (currentMission !== null && !lastMissionPassed) {
+          start(currentMission); // Retry the failed mission
+        } else {
+          showShop();
+        }
+      } else if (phase === 'shop') {
+        showMissionSelect(); // "Next Mission" button always goes to mission select.
       } else if (phase === 'missionSelect') {
         start(null); // "Free Play" button — use default slice shift.
       } else if (phase === 'intro') {
         showMissionSelect(); // intro → mission select
       } else start(null);
+    },
+
+    /**
+     * An item was pressed in an overlay (mission select or shop).
+     * Routes to the right handler based on current phase.
+     * @param {number} index
+     */
+    overlayItem(index) {
+      if (phase === 'missionSelect') {
+        if (index < 0 || index >= MISSIONS.length) return;
+        const unlocked = index === 0 || completedMissions.has(index - 1);
+        if (!unlocked) return;
+        start(index);
+      } else if (phase === 'shop') {
+        if (buyUpgrade(index)) showShop(); // Refresh shop after purchase
+      }
     },
 
     /**

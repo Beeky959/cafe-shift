@@ -70,7 +70,8 @@ export function createUi(handlers) {
   const app = element('app', HTMLElement);
   const time = element('hud-time', HTMLElement);
   const coins = element('hud-coins', HTMLElement);
-  const happy = element('hud-happy', HTMLElement);
+  const served = element('hud-served', HTMLElement);
+  const waiting = element('hud-waiting', HTMLElement);
   const lost = element('hud-lost', HTMLElement);
   const questions = element('hud-questions', HTMLElement);
   const pause = element('pause-button', HTMLButtonElement);
@@ -157,7 +158,8 @@ export function createUi(handlers) {
 
   let lastLabelTick = -1000;
   let lastWallet = 0;
-  let lastHappy = 0;
+  let lastServed = 0;
+  let lastWaiting = 0;
   let lastLost = 0;
   let lastQuestions = 0;
   /** Which guest each rail card showed last frame, to animate a new arrival. */
@@ -233,13 +235,19 @@ export function createUi(handlers) {
       const left = state.timing.shiftLength - state.tick;
       setText(time, state.phase === 'ended' ? 'Closed' : left > 0 ? clockText(left) : 'Closing');
       setText(coins, String(state.economy.wallet));
-      setText(happy, String(state.metrics.guests.leftHappy));
+      const servedCount = state.metrics.guests.served;
+      // Waiting = guests currently in the café who have not been served yet
+      const waitingCount = state.guests.length;
       const lostCount = state.metrics.guests.leftUnhappy + state.metrics.guests.walkedPast;
+      setText(served, String(servedCount));
+      setText(waiting, String(waitingCount));
       setText(lost, String(lostCount));
-      if (state.metrics.guests.leftHappy > lastHappy) bump(happy, 'bump');
+      if (servedCount > lastServed) bump(served, 'bump');
+      if (waitingCount !== lastWaiting) setData(waiting, 'warn', waitingCount >= 3 ? 'yes' : 'no');
       if (lostCount > lastLost) bump(lost, 'shake');
       if (state.metrics.ownerTicks.answer > lastQuestions && state.owner.action?.kind !== 'answer') bump(questions, 'bump');
-      lastHappy = state.metrics.guests.leftHappy;
+      lastServed = servedCount;
+      lastWaiting = waitingCount;
       lastLost = lostCount;
       if (state.owner.action?.kind !== 'answer') lastQuestions = state.metrics.ownerTicks.answer;
       // The last fifteen seconds of the shift.
@@ -324,7 +332,8 @@ export function createUi(handlers) {
       for (const button of targetButtons.values()) button.disabled = !playing;
       if (phase === 'intro' || phase === 'missionSelect' || phase === 'ended' || phase === 'shop') {
         lastWallet = 0;
-        lastHappy = 0;
+        lastServed = 0;
+        lastWaiting = 0;
         lastLost = 0;
         lastQuestions = 0;
         for (const r of receipts) r.until = 0;

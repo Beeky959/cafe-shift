@@ -247,54 +247,77 @@ export const CONFIG = deepFreeze({
  * @property {string} name
  * @property {string} desc Short flavour text.
  * @property {string} shiftId Key into CONFIG.shifts.
- * @property {MissionObjective[]} objectives
+ * @property {MissionObjective[]} objectives Success objectives.
+ * @property {{ label: string, check: (state: import('./types.js').SimState) => boolean }[]} [failConditions] Instant-fail conditions.
+ * @property {number} reward Coins awarded on first completion.
+ * @property {string} [briefing] Shown before the level starts.
  */
 
 /** @type {readonly MissionDef[]} */
 export const MISSIONS = Object.freeze([
   {
     id: 'm1', name: 'Opening Day', desc: 'Your first shift — learn the ropes.',
-    shiftId: 'mission1',
+    shiftId: 'mission1', reward: 20,
+    briefing: 'Welcome to Good Beans Café! Serve lattes and croissants to get started. Take orders, brew drinks, and keep your guests happy.',
     objectives: [
       { label: 'Serve at least 6 guests', check: (s) => s.metrics.guests.served >= 6 },
       { label: 'Earn at least 30 coins', check: (s) => s.economy.grossEarnings >= 30 },
     ],
+    failConditions: [
+      { label: 'No more than 3 guests lost', check: (s) => s.metrics.guests.leftUnhappy + s.metrics.guests.walkedPast > 3 },
+    ],
   },
   {
-    id: 'm2', name: 'Morning Rush', desc: 'The menu is expanding. Keep up!',
-    shiftId: 'mission2',
+    id: 'm2', name: 'Morning Rush', desc: 'The full menu is out. Espresso, mocha, pastries — keep up!',
+    shiftId: 'mission2', reward: 30,
+    briefing: 'The word is spreading. You now serve espresso, latte, mocha and croissants. Some guests will tip if you serve them quickly enough!',
     objectives: [
       { label: 'Serve at least 10 guests', check: (s) => s.metrics.guests.served >= 10 },
       { label: 'Earn at least 3 tips', check: (s) => s.metrics.tips >= 3 },
       { label: 'No more than 1 unhappy guest', check: (s) => s.metrics.guests.leftUnhappy <= 1 },
     ],
+    failConditions: [
+      { label: 'No more than 3 guests lost', check: (s) => s.metrics.guests.leftUnhappy + s.metrics.guests.walkedPast > 3 },
+    ],
   },
   {
-    id: 'm3', name: 'Word Gets Out', desc: 'The café is getting popular. Questions start flying.',
-    shiftId: 'mission3',
+    id: 'm3', name: 'Digital Chaos', desc: 'Everyone has a question. Can you serve and answer?',
+    shiftId: 'mission3', reward: 40,
+    briefing: 'Guests are pulling out their phones with questions about your café. Each one takes you away from the counter. Manage your time carefully — or invest in a TapIt Stand to handle them automatically.',
     objectives: [
       { label: 'Serve at least 12 guests', check: (s) => s.metrics.guests.served >= 12 },
       { label: 'Earn at least 80 coins', check: (s) => s.economy.grossEarnings >= 80 },
       { label: 'Earn at least 5 tips', check: (s) => s.metrics.tips >= 5 },
     ],
+    failConditions: [
+      { label: 'No more than 4 guests lost', check: (s) => s.metrics.guests.leftUnhappy + s.metrics.guests.walkedPast > 4 },
+    ],
   },
   {
-    id: 'm4', name: 'The Regulars', desc: 'Some customers are patient. Others… not so much.',
-    shiftId: 'mission4',
+    id: 'm4', name: 'Upgrade Your Business', desc: 'Invest in upgrades. Some customers are losing patience.',
+    shiftId: 'mission4', reward: 50,
+    briefing: 'Some regulars are getting impatient, while others will wait. Use your coins wisely — upgrades from the shop carry forward to every future shift.',
     objectives: [
       { label: 'Serve all guests', check: (s) => s.metrics.guests.served === s.schedule.length },
       { label: 'No more than 2 unhappy guests', check: (s) => s.metrics.guests.leftUnhappy <= 2 },
       { label: 'Earn at least 100 coins', check: (s) => s.economy.grossEarnings >= 100 },
     ],
+    failConditions: [
+      { label: 'No more than 4 guests lost', check: (s) => s.metrics.guests.leftUnhappy + s.metrics.guests.walkedPast > 4 },
+    ],
   },
   {
-    id: 'm5', name: 'Grand Opening', desc: 'The big day. Everyone is watching.',
-    shiftId: 'mission5',
+    id: 'm5', name: 'Grand Opening Challenge', desc: 'The big day. Everyone is watching.',
+    shiftId: 'mission5', reward: 80,
+    briefing: 'This is it — the grand opening. A packed house, impatient foodies, and phone-wielding influencers. Put everything you have learned and bought to the test.',
     objectives: [
       { label: 'Serve at least 16 guests', check: (s) => s.metrics.guests.served >= 16 },
       { label: 'Earn at least 120 coins', check: (s) => s.economy.grossEarnings >= 120 },
       { label: 'Earn at least 8 tips', check: (s) => s.metrics.tips >= 8 },
       { label: 'No more than 2 unhappy guests', check: (s) => s.metrics.guests.leftUnhappy <= 2 },
+    ],
+    failConditions: [
+      { label: 'No more than 5 guests lost', check: (s) => s.metrics.guests.leftUnhappy + s.metrics.guests.walkedPast > 5 },
     ],
   },
 ]);

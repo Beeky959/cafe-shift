@@ -36,7 +36,7 @@ function start() {
     onChip: (slot) => game.pressChip(slot),
     onPause: () => game.togglePause(),
     onOverlayButton: () => game.overlayButton(),
-    onOverlayItem: (index) => game.selectMission(index),
+    onOverlayItem: (index) => game.overlayItem(index),
   });
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
   game = createGame({ seed: options.seed, ui, draw: renderer.draw, reducedMotion });
