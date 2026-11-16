@@ -13,6 +13,7 @@
  */
 /** @import { SimState, SimEvent, OrderItem } from '../sim/types.js' */
 import { STAGE, along, guestHome, ownerClip, seatOf, spotX, tableCentre, walkPath } from './clips.js';
+import { PROPS } from './props.js';
 
 /** Easing time constant for positions, in milliseconds. */
 const EASE_MS = 45;
@@ -255,6 +256,9 @@ export function createAnimator() {
             break;
           case 'tableWiped':
             add('tableWiped', 650, { tableId: Number(e.tableId), ...tableCentre(Number(e.tableId)) });
+            break;
+          case 'drinkDiscarded':
+            add('discarded', 600, { x: PROPS.machine.cup.x, y: PROPS.machine.cup.y });
             break;
           case 'actionCancelled':
             if (e.reason === 'player') add('cancelled', 320, { x: owner.x, y: owner.y - 170 });

@@ -15,12 +15,12 @@
 /** @import { Service } from '../ui/service.js' */
 /** @import { Animator } from './animator.js' */
 /** @import { Pose, Face } from './characters.js' */
-import { resolveTap } from '../sim/index.js';
+import { resolveTap, isDrink } from '../sim/index.js';
 import { HIT_AREAS, SCENE_HEIGHT, SCENE_WIDTH } from './scene.js';
 import * as art from './art.js';
 import { CAST, OWNER, byte, person, sparkle } from './characters.js';
-import { STAGE, clothAt, guestClip, machineClip, ownerClip, passClip, seatOf, sinkClip, tableCentre, tableDirt } from './clips.js';
-import { PROPS, chair, cloth, cupWithFill, dishInHand, drawBackground, drawForeground, drawLightGlow, drawMachine, drawPass, drawRack, drawSink, drawTableTop, steam } from './props.js';
+import { STAGE, clothAt, guestClip, machineClip, ovenClip, ownerClip, passClip, seatOf, sinkClip, tableCentre, tableDirt } from './clips.js';
+import { PROPS, chair, cloth, cupWithFill, dishInHand, drawBackground, drawForeground, drawLightGlow, drawMachine, drawOven, drawPass, drawRack, drawSink, drawTableTop, steam } from './props.js';
 import { phases, smooth as smoothU, easeOut, easeOutBack, anticipateSettle, bounce, arc, secondaryBob, secondarySwing, hipShift, shoulderCounter } from './anim-utils.js';
 
 export { SCENE_HEIGHT, SCENE_WIDTH };
@@ -69,7 +69,8 @@ function heldItem(cx, item, x, y, size = 26) {
     art.plate(cx, x, y + 4, size * 1.5, false);
     art.croissant(cx, x, y - 2, size);
   } else {
-    cupWithFill(cx, x, y - size * 0.3, size, item === 'cup' ? 0 : 1, item !== 'cup');
+    const drink = isDrink(item) ? item : null;
+    cupWithFill(cx, x, y - size * 0.3, size, item === 'cup' ? 0 : 1, item !== 'cup', drink);
   }
 }
 
@@ -140,6 +141,7 @@ export function createRenderer(canvas) {
     // ---- Stations on the back bar.
     const mClip = machineClip(state);
     const brewPulse = anim.progressOf('brewReady');
+    const machineDrink = mClip.drink;
     drawMachine(
       cx,
       {
@@ -147,12 +149,17 @@ export function createRenderer(canvas) {
         progress: mClip.progress,
         time: time * motion + (motion ? 0 : 0.3),
         pulse: brewPulse < 0 ? 0 : 1 - brewPulse,
-        ticket: service.madeFor('latte'),
-        lifted: carrying === 'latte',
-        hidden: view.drag?.item === 'latte',
+        ticket: machineDrink ? service.madeFor(machineDrink) : null,
+        lifted: !!machineDrink && carrying === machineDrink,
+        hidden: !!machineDrink && view.drag?.item === machineDrink,
+        drink: machineDrink,
       },
       tag,
     );
+    // ---- Oven on the back bar.
+    const ovClip = ovenClip(state);
+    drawOven(cx, { state: ovClip.state, progress: ovClip.progress, stock: ovClip.stock, maxStock: ovClip.maxStock, time: time * motion });
+
     const pClip = passClip(state);
     const platePop = anim.progressOf('plated');
     drawPass(
@@ -330,6 +337,29 @@ export function createRenderer(canvas) {
         art.rounded(cx, f.x + 24, y - 14, 74, 28, 10, '#dff0ff', '#2f6fb0', 2);
         art.textAt(cx, `${(timing.answer / 30).toFixed(1)} s`, f.x + 61, y + 6, 17, '#1f4f85', 1000);
         cx.globalAlpha = 1;
+      } else if (f.type === 'discarded' && f.x !== undefined && f.y !== undefined) {
+        // Pour-out splash: liquid drops fall and fade.
+        cx.globalAlpha = 1 - Math.max(0, t - 0.4) / 0.6;
+        const drops = 5;
+        for (let i = 0; i < drops; i++) {
+          const angle = -0.8 + (i / (drops - 1)) * 1.6;
+          const dist = 14 + t * 36;
+          const dx = f.x + Math.sin(angle) * dist;
+          const dy = f.y + t * 40 + Math.abs(Math.sin(angle)) * 10;
+          const r = 3 * (1 - t * 0.6);
+          art.oval(cx, dx, dy, r, r * 1.4, '#8a5a3a');
+        }
+        // Splash ring at base.
+        cx.strokeStyle = '#8a5a3a60';
+        cx.lineWidth = 2;
+        cx.beginPath();
+        cx.ellipse(f.x, f.y + 30, 16 + t * 20, 4 + t * 6, 0, 0, Math.PI * 2);
+        cx.stroke();
+        // "DISCARD" text rising up.
+        const textY = f.y - 20 - t * 30;
+        art.rounded(cx, f.x - 36, textY - 12, 72, 22, 8, '#5a2a18cc');
+        art.textAt(cx, 'DISCARD', f.x, textY + 6, 13, '#ffb870', 800);
+        cx.globalAlpha = 1;
       } else if (f.type === 'cancelled' && f.x !== undefined && f.y !== undefined) {
         cx.globalAlpha = 1 - t;
         // Fading red ring
@@ -421,8 +451,8 @@ export function createRenderer(canvas) {
       // Softer, larger drop shadow for lifted item
       art.oval(cx, d.x, d.y + 36, 34, 10, '#00000020');
       art.oval(cx, d.x, d.y + 34, 28, 7, '#00000030');
-      if (d.item === 'latte') {
-        cupWithFill(cx, d.x - 4, d.y, 52, 1, true);
+      if (isDrink(d.item)) {
+        cupWithFill(cx, d.x - 4, d.y, 52, 1, true, d.item);
         steam(cx, d.x - 4, d.y - 24, time * motion, 1);
       } else {
         art.plate(cx, d.x, d.y + 8, 76, false);
@@ -681,7 +711,7 @@ export function createRenderer(canvas) {
             pose.lean = 0.02 * k * motion;
             pose.rightHand = { x: 4, y: -96 + k * -4 };
             pose.leftHand = { x: 14, y: -90 };
-            if (item === 'latte' || item === 'croissant') pose.holdRight = (c, x, y) => heldItem(c, item, x, y - 6, 28);
+            if (item && item !== 'cup' && item !== 'cloth') pose.holdRight = (c, x, y) => heldItem(c, /** @type {OrderItem} */ (item), x, y - 6, 28);
             face.mouth = 'smile';
             face.lookY = 0.3;
             break;
@@ -692,7 +722,7 @@ export function createRenderer(canvas) {
             pose.lean = (0.02 - 0.04 * k) * motion;
             pose.rightHand = { x: 4, y: -100 + k * 20 };
             pose.leftHand = { x: 14, y: -90 + k * 10 };
-            if (item === 'latte' || item === 'croissant') pose.holdRight = (c, x, y) => heldItem(c, item, x, y - 6, 28);
+            if (item && item !== 'cup' && item !== 'cloth') pose.holdRight = (c, x, y) => heldItem(c, /** @type {OrderItem} */ (item), x, y - 6, 28);
             face.mouth = 'grin';
             face.lookY = 0.4 + st * 0.3;
             // Eyes widen at the moment of offering
@@ -705,7 +735,7 @@ export function createRenderer(canvas) {
             pose.rightHand = { x: 4, y: -80 + sway };
             pose.leftHand = { x: 14, y: -80 + sway * 0.6 };
             pose.lean = -0.02 * motion;
-            if (item === 'latte' || item === 'croissant') pose.holdRight = (c, x, y) => heldItem(c, item, x, y - 6, 28);
+            if (item && item !== 'cup' && item !== 'cloth') pose.holdRight = (c, x, y) => heldItem(c, /** @type {OrderItem} */ (item), x, y - 6, 28);
             face.mouth = 'grin';
             face.lookY = 0.6;
             break;
@@ -833,7 +863,8 @@ export function createRenderer(canvas) {
       const phase = seated.id * 1.7;
       // Sip cycle: anticipation (reach) → sip → lower → rest
       const sipCycle = (time * 0.9 + phase) % (Math.PI * 2);
-      const sipActive = spec?.order === 'latte' && sipCycle > 5.2 && motion > 0;
+      const seatedDrink = isDrink(spec?.order ?? '') ? /** @type {import('../sim/types.js').DrinkItem} */ (spec?.order) : null;
+      const sipActive = !!seatedDrink && sipCycle > 5.2 && motion > 0;
       const sipT = sipActive ? clamp01((sipCycle - 5.2) / 1.0) : 0;
       // Smooth sip arc: cup rises, pauses, lowers
       const sipLift = sipActive ? (sipT < 0.4 ? easeOut(sipT / 0.4) : sipT < 0.7 ? 1 : easeOut((1 - sipT) / 0.3)) : 0;
@@ -857,7 +888,7 @@ export function createRenderer(canvas) {
           : { x: 30, y: -76 },
         leftHand: { x: 40, y: -80 + (sipActive ? sipLift * -4 : 0) },
         holdRight: sipActive
-          ? (cc, x, y) => cupWithFill(cc, x, y - 4, 22, 0.8, false)
+          ? (cc, x, y) => cupWithFill(cc, x, y - 4, 22, 0.8, false, seatedDrink)
           : null,
         // Subtle head tilt while sipping
         headSettle: sipActive ? sipLift * -0.06 : Math.sin(time * 0.8 + phase) * 0.01 * motion,
@@ -867,12 +898,13 @@ export function createRenderer(canvas) {
     drawTableTop(cx, { x: c.x, y: c.y - 4, dirt: tableDirt(state, tableId), shine: wiped < 0 ? 0 : wiped });
     if (seated && seated.dishId !== null) {
       const spec = state.schedule.find((s) => s.id === seated.id);
-      const sipping = spec?.order === 'latte' && Math.sin(time * 0.9 + seated.id * 1.7) > 0.9 && motion > 0;
+      const tableDrink = isDrink(spec?.order ?? '') ? /** @type {import('../sim/types.js').DrinkItem} */ (spec?.order) : null;
+      const sipping = !!tableDrink && Math.sin(time * 0.9 + seated.id * 1.7) > 0.9 && motion > 0;
       if (spec?.order === 'croissant') {
         art.plate(cx, c.x - 14, c.y - 6, 48, false);
         art.croissant(cx, c.x - 14, c.y - 12, 28);
       } else if (!sipping) {
-        cupWithFill(cx, c.x - 14, c.y - 10, 26, 0.8, true);
+        cupWithFill(cx, c.x - 14, c.y - 10, 26, 0.8, true, tableDrink);
       }
     }
   }
@@ -1093,7 +1125,7 @@ export function createRenderer(canvas) {
     } else {
       art.rounded(cx, bx, by, bw, bh, 8, '#fff9e9', attended || selected ? '#ff8d20' : '#6d4b42', attended || selected ? 6 : 3);
       art.poly(cx, [[body.x - 8, by + bh - 2], [body.x + 8, by + bh - 2], [body.x, by + bh + 10]], '#fff9e9');
-      if (spec.order === 'latte') cupWithFill(cx, bx + bw / 2 + (big ? 8 : 0), by + bh / 2 + 4, bh * 0.56, 1, true);
+      if (isDrink(spec.order)) cupWithFill(cx, bx + bw / 2 + (big ? 8 : 0), by + bh / 2 + 4, bh * 0.56, 1, true, spec.order);
       else art.croissant(cx, bx + bw / 2 + (big ? 8 : 0), by + bh / 2 + 2, bh * 0.56);
     }
     art.tag(cx, bx + (big ? 4 : 2), by + 4, big ? 17 : 13, g.id, asking ? '#2f6fb0' : '#30303a');

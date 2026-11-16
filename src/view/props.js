@@ -13,6 +13,17 @@ import { cup, croissant, oval, plate, poly, rounded, textAt } from './art.js';
 import { shade, sparkle } from './characters.js';
 
 /** @typedef {CanvasRenderingContext2D} Ctx */
+/** @typedef {import('../sim/types.js').DrinkItem} DrinkItem */
+
+/**
+ * Visual colours for each drink type.
+ * @type {Record<string, { fill: string, rich: string, stream: string, streamHighlight: string, foam: string, label: string }>}
+ */
+export const DRINK_LOOK = {
+  espresso: { fill: '#3a1a08', rich: '#5a2a10', stream: '#2a1208', streamHighlight: '#6a3a18', foam: '#c8a070', label: 'ESP' },
+  latte:    { fill: '#b8835a', rich: '#c99a6a', stream: '#4a2412', streamHighlight: '#a8673a', foam: '#f6e9d2', label: 'LAT' },
+  mocha:    { fill: '#4a2218', rich: '#6a3828', stream: '#321410', streamHighlight: '#7a4830', foam: '#d4b090', label: 'MOC' },
+};
 
 /** Where the fixed props are. Scene units. */
 export const PROPS = Object.freeze({
@@ -22,6 +33,7 @@ export const PROPS = Object.freeze({
   machine: { x: 66, y: 168, w: 128, h: 94, spout: { x: 124, y: 220 }, cup: { x: 124, y: 250 }, light: { x: 84, y: 184 }, gauge: { x: 166, y: 194 } },
   caseBox: { x: 266, y: 186, w: 152, h: 76 },
   pass: { x: 342, y: 270 },
+  oven: { x: 194, y: 204, w: 54, h: 52 },
   sink: { x: 762, y: 230, w: 140, h: 40, basin: { x: 832, y: 252 }, tap: { x: 822, y: 214 } },
   rack: { x: 770, y: 182, w: 132 },
   window: { x: 462, y: 56, w: 256, h: 122 },
@@ -130,7 +142,7 @@ export function drawBackground(cx) {
   // Chalk dust effect.
   cx.fillStyle = '#f3ead40a';
   cx.fillRect(66, 56, 246, 86);
-  const items = [['Latte', '8'], ['Croissant', '6'], ['Espresso', '5'], ['Mocha', '7']];
+  const items = [['Latte', '8'], ['Croissant', '6'], ['Espresso', '5'], ['Mocha', '10']];
   items.forEach(([name, price], i) => {
     const col = i % 2;
     const row = Math.floor(i / 2);
@@ -415,6 +427,122 @@ function drawSinkStatic(cx) {
 }
 
 /**
+ * @typedef {object} OvenLook
+ * @property {'empty' | 'baking' | 'ready'} state
+ * @property {number} progress 0-1 for baking.
+ * @property {number} stock Current display stock.
+ * @property {number} maxStock Max display stock.
+ * @property {number} time Animation time in seconds.
+ */
+
+/**
+ * Draw the oven on the back bar with baking progress and pastry stock.
+ * @param {Ctx} cx
+ * @param {OvenLook} look
+ */
+export function drawOven(cx, look) {
+  const o = PROPS.oven;
+  const midX = o.x + o.w / 2;
+
+  // Oven body — rounded dark metal box.
+  rounded(cx, o.x, o.y, o.w, o.h, 6, '#3a3a3e', '#2a2a2e', 3);
+
+  // Door with glass window.
+  const doorY = o.y + 10;
+  const doorH = o.h - 14;
+  rounded(cx, o.x + 6, doorY, o.w - 12, doorH, 4, '#4a4a50', '#333338', 2);
+
+  // Glass window — glows orange when baking.
+  const glassX = o.x + 10;
+  const glassY = doorY + 4;
+  const glassW = o.w - 20;
+  const glassH = doorH - 12;
+  if (look.state === 'baking') {
+    // Warm orange glow inside.
+    const glow = cx.createRadialGradient(midX, glassY + glassH / 2, 2, midX, glassY + glassH / 2, glassW);
+    glow.addColorStop(0, '#ff8c30');
+    glow.addColorStop(0.6, '#e06820');
+    glow.addColorStop(1, '#a04010');
+    rounded(cx, glassX, glassY, glassW, glassH, 3, glow);
+    // Pulsing light effect.
+    const pulse = 0.5 + 0.5 * Math.sin(look.time * 3);
+    cx.globalAlpha = 0.15 + 0.1 * pulse;
+    rounded(cx, glassX, glassY, glassW, glassH, 3, '#ffcc66');
+    cx.globalAlpha = 1;
+  } else if (look.state === 'ready') {
+    // Bright warm glow — pastries are done!
+    rounded(cx, glassX, glassY, glassW, glassH, 3, '#ffb040');
+    cx.globalAlpha = 0.3;
+    rounded(cx, glassX, glassY, glassW, glassH, 3, '#ffe880');
+    cx.globalAlpha = 1;
+  } else {
+    // Empty — dark glass.
+    rounded(cx, glassX, glassY, glassW, glassH, 3, '#1a1a20');
+    // Subtle reflection.
+    cx.strokeStyle = '#ffffff18';
+    cx.lineWidth = 1;
+    cx.beginPath();
+    cx.moveTo(glassX + 3, glassY + 3);
+    cx.lineTo(glassX + glassW * 0.4, glassY + 3);
+    cx.stroke();
+  }
+
+  // Door handle — small knob.
+  rounded(cx, o.x + o.w - 10, doorY + doorH / 2 - 3, 5, 6, 2, '#606068');
+
+  // Top vent lines.
+  cx.strokeStyle = '#2a2a2e';
+  cx.lineWidth = 1;
+  for (let i = 0; i < 3; i++) {
+    cx.beginPath();
+    cx.moveTo(o.x + 14 + i * 10, o.y + 3);
+    cx.lineTo(o.x + 14 + i * 10, o.y + 7);
+    cx.stroke();
+  }
+
+  // Progress bar below oven when baking.
+  if (look.state === 'baking') {
+    const barX = o.x + 4;
+    const barY = o.y + o.h + 2;
+    const barW = o.w - 8;
+    const barH = 4;
+    rounded(cx, barX, barY, barW, barH, 2, '#2a2a2e');
+    if (look.progress > 0) {
+      const fillW = Math.max(3, barW * look.progress);
+      rounded(cx, barX, barY, fillW, barH, 2, '#ff9030');
+    }
+  }
+
+  // Pastry stock display — small croissant icons below the oven.
+  const stockY = o.y + o.h + 9;
+  const stockStartX = midX - (look.maxStock * 7) / 2;
+  for (let i = 0; i < look.maxStock; i++) {
+    const sx = stockStartX + i * 7 + 3;
+    if (i < look.stock) {
+      // Filled pastry dot.
+      oval(cx, sx, stockY, 3, 2.5, '#d4a06a');
+      oval(cx, sx, stockY - 0.5, 2.5, 2, '#e8b87a');
+    } else {
+      // Empty slot.
+      oval(cx, sx, stockY, 3, 2.5, '#5a5a5e');
+    }
+  }
+
+  // "OVEN" label.
+  textAt(cx, 'OVEN', midX, o.y - 3, 8, '#9a9a9e', 800);
+
+  // Baking glow effect on surrounding area.
+  if (look.state === 'baking' || look.state === 'ready') {
+    const halo = cx.createRadialGradient(midX, o.y + o.h / 2, 4, midX, o.y + o.h / 2, 50);
+    const col = look.state === 'ready' ? '#ffb04020' : '#ff6a2018';
+    halo.addColorStop(0, col);
+    halo.addColorStop(1, '#ff6a2000');
+    cx.fillStyle = halo;
+    cx.fillRect(o.x - 30, o.y - 20, o.w + 60, o.h + 40);
+  }
+}
+
+/**
  * The front counter and the counter gate. Drawn over the owner, so it hides
  * their legs, and under the guests.
  * @param {Ctx} cx
@@ -483,6 +611,7 @@ export function drawForeground(cx) {
  * @property {number | null} ticket
  * @property {boolean} lifted The ready cup has been picked up by the player.
  * @property {boolean} hidden The ready cup is being dragged.
+ * @property {DrinkItem | null} drink Which drink type is brewing/ready.
  */
 
 /**
@@ -555,6 +684,7 @@ export function drawMachine(cx, m, tag) {
   // The cup.
   const showCup = m.state === 'brewing' || (m.state === 'ready' && !m.hidden);
   if (!showCup) return;
+  const drinkLook = DRINK_LOOK[m.drink ?? 'latte'] ?? DRINK_LOOK.latte;
   const lift = m.state === 'ready' && m.lifted ? -12 : 0;
   const cxp = M.cup.x;
   const cyp = M.cup.y + lift;
@@ -564,22 +694,22 @@ export function drawMachine(cx, m, tag) {
     const flow = fill < 0.9 ? 1 : (1 - fill) / 0.1;
     cx.lineCap = 'round';
     for (const dx of [-4, 4]) {
-      cx.strokeStyle = '#4a2412';
+      cx.strokeStyle = drinkLook.stream;
       cx.lineWidth = 5 * flow;
       cx.beginPath();
       cx.moveTo(cxp + dx, M.spout.y + 6);
       cx.lineTo(cxp + dx * 0.6 + Math.sin(m.time * 30 + dx) * 0.8, cyp - 10 - fill * 4);
       cx.stroke();
-      cx.strokeStyle = '#a8673a';
+      cx.strokeStyle = drinkLook.streamHighlight;
       cx.lineWidth = 2 * flow;
       cx.stroke();
     }
     cx.lineCap = 'butt';
-    cupWithFill(cx, cxp, cyp, 40, fill, false);
+    cupWithFill(cx, cxp, cyp, 40, fill, false, m.drink);
     // Splash ring where the stream meets the coffee.
     if (flow > 0.2) {
       const r = 5 + Math.sin(m.time * 24) * 1.5;
-      cx.strokeStyle = '#c99a6a';
+      cx.strokeStyle = drinkLook.rich;
       cx.lineWidth = 1.5;
       cx.beginPath();
       cx.ellipse(cxp, cyp - 8 - fill * 6, r * 1.6, r * 0.5, 0, 0, Math.PI * 2);
@@ -595,12 +725,13 @@ export function drawMachine(cx, m, tag) {
       cx.stroke();
     }
     if (m.lifted) oval(cx, cxp, M.cup.y + 14, 18, 4, '#00000030');
-    cupWithFill(cx, cxp, cyp, 40, 1, true);
+    cupWithFill(cx, cxp, cyp, 40, 1, true, m.drink);
     steam(cx, cxp, cyp - 20, m.time, 1);
-    // READY pill above the machine.
+    // READY pill above the machine — shows drink type.
     const pillY = M.y - 52;
     rounded(cx, M.x + 4, pillY, M.w - 8, 26, 13, m.lifted ? '#ffb03a' : '#7fe36b', '#2c3a12', 3);
-    textAt(cx, m.lifted ? 'IN HAND' : 'READY', M.x + M.w / 2, pillY + 19, 16, '#20300c', 1000);
+    const pillText = m.lifted ? 'IN HAND' : (drinkLook.label + ' READY');
+    textAt(cx, pillText, M.x + M.w / 2, pillY + 19, 16, '#20300c', 1000);
   }
   if (m.ticket !== null) tag(cx, cxp + 30, cyp - 6, 14, m.ticket);
 }
@@ -612,8 +743,10 @@ export function drawMachine(cx, m, tag) {
  * @param {number} s
  * @param {number} fill 0-1.
  * @param {boolean} art Draw latte art on a full cup.
+ * @param {DrinkItem | null} [drink] Which drink for colour; defaults to latte.
  */
-export function cupWithFill(cx, x, y, s, fill, art) {
+export function cupWithFill(cx, x, y, s, fill, art, drink) {
+  const look = DRINK_LOOK[drink ?? 'latte'] ?? DRINK_LOOK.latte;
   cup(cx, x, y, s, false);
   // Repaint the inside with the current level.
   const innerW = s * 0.72;
@@ -621,10 +754,10 @@ export function cupWithFill(cx, x, y, s, fill, art) {
   rounded(cx, x - innerW / 2, innerTop, innerW, s * 0.2, s * 0.08, '#f4ead7');
   if (fill > 0) {
     const h = s * 0.2 * Math.min(1, fill);
-    rounded(cx, x - innerW / 2, innerTop + s * 0.2 - h, innerW, h, s * 0.06, fill > 0.85 ? '#b8835a' : '#7a4524');
+    rounded(cx, x - innerW / 2, innerTop + s * 0.2 - h, innerW, h, s * 0.06, fill > 0.85 ? look.fill : look.stream);
   }
   if (art && fill >= 1) {
-    cx.fillStyle = '#f6e9d2';
+    cx.fillStyle = look.foam;
     cx.beginPath();
     cx.ellipse(x, innerTop + s * 0.1, s * 0.12, s * 0.06, 0, 0, Math.PI * 2);
     cx.fill();

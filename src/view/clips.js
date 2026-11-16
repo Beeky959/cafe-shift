@@ -155,6 +155,7 @@ export function ownerClip(state) {
  * @typedef {object} MachineClip
  * @property {'empty' | 'loading' | 'brewing' | 'ready' | 'claimed'} state
  * @property {number} progress
+ * @property {import('../sim/types.js').DrinkItem | null} drink Which drink type is in the slot.
  */
 
 /**
@@ -164,10 +165,40 @@ export function ownerClip(state) {
 export function machineClip(state) {
   const slot = state.machine.slots[0];
   const action = state.owner.action;
-  if (slot.state === 'brewing') return { state: 'brewing', progress: Math.max(0, Math.min(1, 1 - slot.ticksLeft / state.timing.brew)) };
-  if (slot.state === 'ready') return { state: slot.claimedBy !== null ? 'claimed' : 'ready', progress: 1 };
-  if (action && action.kind === 'brewStart') return { state: 'loading', progress: 0 };
-  return { state: 'empty', progress: 0 };
+  if (slot.state === 'brewing') {
+    const brewTime = slot.drink === 'espresso' ? state.timing.brewEspresso
+      : slot.drink === 'mocha' ? state.timing.brewMocha
+      : state.timing.brew;
+    return { state: 'brewing', progress: Math.max(0, Math.min(1, 1 - slot.ticksLeft / brewTime)), drink: slot.drink };
+  }
+  if (slot.state === 'ready') return { state: slot.claimedBy !== null ? 'claimed' : 'ready', progress: 1, drink: slot.drink };
+  if (action && action.kind === 'brewStart') return { state: 'loading', progress: 0, drink: action.claims.drinkType ?? 'latte' };
+  return { state: 'empty', progress: 0, drink: null };
+}
+
+/**
+ * @typedef {object} OvenClip
+ * @property {'empty' | 'baking' | 'ready'} state
+ * @property {number} progress 0-1 for baking.
+ * @property {number} stock Current pastry display stock.
+ * @property {number} maxStock Max pastry display stock.
+ */
+
+/**
+ * @param {SimState} state
+ * @returns {OvenClip}
+ */
+export function ovenClip(state) {
+  const oven = state.oven;
+  const progress = oven.state === 'baking'
+    ? Math.max(0, Math.min(1, 1 - oven.ticksLeft / state.timing.bake))
+    : oven.state === 'ready' ? 1 : 0;
+  return {
+    state: oven.state,
+    progress,
+    stock: state.pastryStock.display,
+    maxStock: state.pastryStock.maxDisplay,
+  };
 }
 
 /**
