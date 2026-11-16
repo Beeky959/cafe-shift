@@ -27,6 +27,7 @@ export function scene(guests) {
     order: g.order ?? 'latte',
     question: g.question ? { topic: g.question, supported: g.question !== 'washroom' } : null,
     usesStandIfPresent: false,
+    personality: 'regular',
     seatTicks: g.seat ?? 240,
     look: 0,
   }));

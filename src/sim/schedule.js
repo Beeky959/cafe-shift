@@ -3,7 +3,7 @@
  * Builds the guest schedule for a shift. Pure: the same shift config and seed
  * always give the same schedule. See docs/TECH_BLUEPRINT.md §3.
  */
-/** @import { GuestSpec, GuestQuestion, OrderItem, DrinkItem } from './types.js' */
+/** @import { GuestSpec, GuestQuestion, GuestPersonality, OrderItem, DrinkItem } from './types.js' */
 /** @import { ShiftConfig } from './config.js' */
 import { CONFIG, toTicks } from './config.js';
 import { createRng, shuffled, streamSeed } from './rng.js';
@@ -32,6 +32,11 @@ function validateShift(shift) {
   }
   if (shift.supportedQuestionGuests + shift.unsupportedQuestionGuests > shift.guests) {
     throw new RangeError(`Shift "${shift.id}": more question guests than guests`);
+  }
+  const impatient = shift.impatientGuests ?? 0;
+  const patient = shift.patientGuests ?? 0;
+  if (impatient + patient > shift.guests) {
+    throw new RangeError(`Shift "${shift.id}": impatient + patient exceeds total guests`);
   }
   if (shift.standUseFraction < 0 || shift.standUseFraction > 1) {
     throw new RangeError(`Shift "${shift.id}": standUseFraction must be within 0–1`);
@@ -121,6 +126,15 @@ export function buildSchedule(shift, seed) {
   const standUsers = Math.round(shift.supportedQuestionGuests * shift.standUseFraction);
   const standAt = new Set(shuffled(supportedAt, rngFor('stand')).slice(0, standUsers));
 
+  // Personalities: exact counts of impatient and patient; rest are regular.
+  const personalityOrder = shuffled(positions, rngFor('personalities'));
+  const impatientCount = shift.impatientGuests ?? 0;
+  const patientCount = shift.patientGuests ?? 0;
+  /** @type {Map<number, GuestPersonality>} */
+  const personalityAt = new Map();
+  personalityOrder.slice(0, impatientCount).forEach((p) => personalityAt.set(p, 'impatient'));
+  personalityOrder.slice(impatientCount, impatientCount + patientCount).forEach((p) => personalityAt.set(p, 'patient'));
+
   const seatRng = rngFor('seats');
   const lookRng = rngFor('looks');
   const seatMin = toTicks(CONFIG.seatSeconds.min);
@@ -137,6 +151,7 @@ export function buildSchedule(shift, seed) {
       order,
       question: questionAt.get(position) ?? null,
       usesStandIfPresent: standAt.has(position),
+      personality: personalityAt.get(position) ?? 'regular',
       seatTicks: seatRng.range(seatMin, seatMax),
       look: lookRng.int(CONFIG.guestLooks),
     };

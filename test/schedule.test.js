@@ -31,6 +31,12 @@ test('every schedule meets the exact counts in the shift config', () => {
       schedule.filter((g) => g.usesStandIfPresent).length,
       Math.round(shift.supportedQuestionGuests * shift.standUseFraction),
     );
+    assert.equal(schedule.filter((g) => g.personality === 'impatient').length, shift.impatientGuests ?? 0);
+    assert.equal(schedule.filter((g) => g.personality === 'patient').length, shift.patientGuests ?? 0);
+    assert.equal(
+      schedule.filter((g) => g.personality === 'regular').length,
+      shift.guests - (shift.impatientGuests ?? 0) - (shift.patientGuests ?? 0),
+    );
     // Only guests with a supported question may use a stand.
     assert.ok(schedule.every((g) => !g.usesStandIfPresent || g.question?.supported === true));
     // Every supported topic appears, because there are at least as many askers as topics.

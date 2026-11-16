@@ -1061,6 +1061,49 @@ export function createRenderer(canvas) {
     cx.fill();
     cx.restore();
     person(cx, body.x, body.y, scale, look, pose);
+
+    // Personality badge: small icon above the guest's head for non-regular types.
+    const spec = state.schedule.find((s) => s.id === g.id);
+    if (spec && spec.personality !== 'regular') {
+      const badgeY = body.y - 170 * scale;
+      const badgeX = body.x + 18 * scale;
+      const r = 8;
+      cx.save();
+      cx.globalAlpha = 0.85;
+      if (spec.personality === 'impatient') {
+        // Orange-red circle with lightning bolt
+        cx.fillStyle = '#e05030';
+        cx.beginPath();
+        cx.arc(badgeX, badgeY, r, 0, Math.PI * 2);
+        cx.fill();
+        cx.strokeStyle = '#fff';
+        cx.lineWidth = 1.5;
+        cx.beginPath();
+        cx.moveTo(badgeX - 1, badgeY - 5);
+        cx.lineTo(badgeX + 2, badgeY - 1);
+        cx.lineTo(badgeX - 1, badgeY);
+        cx.lineTo(badgeX + 1, badgeY + 5);
+        cx.stroke();
+      } else {
+        // Blue-green circle with hourglass
+        cx.fillStyle = '#3090b0';
+        cx.beginPath();
+        cx.arc(badgeX, badgeY, r, 0, Math.PI * 2);
+        cx.fill();
+        cx.strokeStyle = '#fff';
+        cx.lineWidth = 1.5;
+        cx.beginPath();
+        cx.moveTo(badgeX - 3, badgeY - 4);
+        cx.lineTo(badgeX + 3, badgeY - 4);
+        cx.lineTo(badgeX, badgeY);
+        cx.lineTo(badgeX + 3, badgeY + 4);
+        cx.lineTo(badgeX - 3, badgeY + 4);
+        cx.lineTo(badgeX, badgeY);
+        cx.closePath();
+        cx.stroke();
+      }
+      cx.restore();
+    }
   }
 
   /**

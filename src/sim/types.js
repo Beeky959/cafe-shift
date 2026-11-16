@@ -14,6 +14,8 @@
 
 /** @typedef {'none' | 'test-stand'} PresetId */
 
+/** @typedef {'regular' | 'impatient' | 'patient'} GuestPersonality */
+
 /**
  * A question a guest will ask after being served.
  * @typedef {object} GuestQuestion
@@ -30,6 +32,7 @@
  * @property {GuestQuestion | null} question
  * @property {boolean} usesStandIfPresent Fixed by the seed, whether or not a stand exists.
  * @property {number} seatTicks How long the guest stays once seated.
+ * @property {GuestPersonality} personality Affects patience. 'regular' = 1×, 'impatient' = 0.6×, 'patient' = 1.5×.
  * @property {number} look Appearance index for the view. No rule depends on it.
  */
 

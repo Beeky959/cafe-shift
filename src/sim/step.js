@@ -564,7 +564,8 @@ function completeAction(state, action, emit, freshBrews) {
       dishOf(state, dishId).holder = { kind: 'guest', guestId: guest.id };
       guest.dishId = dishId;
       guest.attendedBy = null;
-      guest.tipEligible = guest.patienceLeft > state.timing.counterPatience * CONFIG.tipPatienceFraction;
+      const personalPatience = state.timing.counterPatience * CONFIG.personalityPatience[spec.personality];
+      guest.tipEligible = guest.patienceLeft > personalPatience * CONFIG.tipPatienceFraction;
       const price = CONFIG.prices[spec.order];
       earn(state, price);
       state.metrics.guests.served += 1;
@@ -581,7 +582,7 @@ function completeAction(state, action, emit, freshBrews) {
           emit('guestToStand', { guestId: guest.id, topic: spec.question.topic });
         } else {
           guest.state = 'asking';
-          guest.patienceLeft = state.timing.askingPatience;
+          guest.patienceLeft = Math.round(state.timing.askingPatience * CONFIG.personalityPatience[spec.personality]);
           emit('guestAsked', { guestId: guest.id, topic: spec.question.topic });
         }
       } else {
@@ -823,7 +824,7 @@ function admitArrivals(state, emit) {
       place: spot === -1 ? { kind: 'door' } : { kind: 'spot', index: spot },
       dishId: null,
       attendedBy: null,
-      patienceLeft: state.timing.counterPatience,
+      patienceLeft: Math.round(state.timing.counterPatience * CONFIG.personalityPatience[spec.personality]),
       timerLeft: spot === -1 ? 0 : state.timing.walkIn,
       tipEligible: false,
     };

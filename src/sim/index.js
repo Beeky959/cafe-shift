@@ -2,7 +2,7 @@
 /**
  * Public surface of the simulation. Code outside src/sim imports from here.
  */
-export { CONFIG, STATE_VERSION, TICKS_PER_SECOND, toTicks, isDrink } from './config.js';
+export { CONFIG, STATE_VERSION, TICKS_PER_SECOND, toTicks, isDrink, MISSIONS } from './config.js';
 export { createRng, hashString, shuffled, streamSeed } from './rng.js';
 export { buildSchedule } from './schedule.js';
 export { createInitialState, isPresetId } from './state.js';

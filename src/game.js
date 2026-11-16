@@ -8,7 +8,7 @@
 /** @import { HitArea } from './view/scene.js' */
 /** @import { ViewState } from './view/renderer.js' */
 /** @import { Outcome } from './ui/service.js' */
-import { TICKS_PER_SECOND, createInitialState, digest, resolveTap, step } from './sim/index.js';
+import { TICKS_PER_SECOND, MISSIONS, createInitialState, digest, resolveTap, step } from './sim/index.js';
 import { createByte } from './ui/byte.js';
 import { rejectionText } from './ui/labels.js';
 import { createService } from './ui/service.js';
@@ -23,7 +23,7 @@ const NOTICE_MS = 2200;
 /** A press that moves less than this, in scene units, is a tap, not a drag. */
 const DRAG_THRESHOLD = 24;
 
-/** @typedef {'intro' | 'playing' | 'paused' | 'ended' | 'shop'} GamePhase */
+/** @typedef {'intro' | 'missionSelect' | 'playing' | 'paused' | 'ended' | 'shop'} GamePhase */
 /** @typedef {import('./ui/byte.js').Mood} Mood */
 
 /**
@@ -32,7 +32,7 @@ const DRAG_THRESHOLD = 24;
  * @property {(text: string, mood: Mood | 'notice') => void} say
  * @property {(slot: number, text: string, until: number) => void} receipt
  * @property {(phase: GamePhase) => void} setPhase
- * @property {(content: { title: string, lines: string[], button: string } | null) => void} showOverlay
+ * @property {(content: { title: string, lines: string[], button: string, items?: { label: string, sublabel: string, status: 'locked' | 'available' | 'completed' }[] } | null) => void} showOverlay
  * @property {(key: string, value: string) => void} setData
  */
 
@@ -62,6 +62,12 @@ export function createGame({ seed, ui, draw, reducedMotion = false }) {
   /** Upgrades purchased across shifts. */
   /** @type {Set<string>} */
   const purchased = new Set();
+  /** Which mission indices the player has completed. */
+  /** @type {Set<number>} */
+  const completedMissions = new Set();
+  /** Index into MISSIONS for the current or last-played mission (null = free play / intro). */
+  /** @type {number | null} */
+  let currentMission = null;
 
   /** @type {SimState} */
   let state = createInitialState({ seed });
@@ -128,21 +134,55 @@ export function createGame({ seed, ui, draw, reducedMotion = false }) {
     });
   }
 
+  function showMissionSelect() {
+    setPhase('missionSelect');
+    const items = MISSIONS.map((m, i) => {
+      const done = completedMissions.has(i);
+      // Mission 0 is always available; others unlock when the previous one is completed.
+      const unlocked = i === 0 || completedMissions.has(i - 1);
+      return {
+        label: `${i + 1}. ${m.name}`,
+        sublabel: m.desc,
+        status: /** @type {'locked' | 'available' | 'completed'} */ (done ? 'completed' : unlocked ? 'available' : 'locked'),
+      };
+    });
+    ui.showOverlay({
+      title: 'Choose a Mission',
+      lines: [`Wallet: ${wallet} coins.`],
+      button: 'Free Play',
+      items,
+    });
+  }
+
   function showResults() {
     const g = state.metrics.guests;
     const earned = state.economy.grossEarnings;
     wallet += earned;
     const answerSeconds = Math.round((state.metrics.ownerTicks.answer / TICKS_PER_SECOND) * 10) / 10;
-    ui.showOverlay({
-      title: 'Shift over',
-      lines: [
-        `${g.leftHappy} of ${state.schedule.length} guests left happy.`,
-        `${earned} coins earned, including ${state.metrics.tips} tip${state.metrics.tips === 1 ? '' : 's'}.`,
-        `You answered ${questionsAnswered} question${questionsAnswered === 1 ? '' : 's'} yourself: ${answerSeconds} s away from the counter.`,
-        `Score: ${state.economy.score}. Wallet: ${wallet} coins.`,
-      ],
-      button: 'Upgrade Shop',
-    });
+    /** @type {string[]} */
+    const lines = [
+      `${g.leftHappy} of ${state.schedule.length} guests left happy.`,
+      `${earned} coins earned, including ${state.metrics.tips} tip${state.metrics.tips === 1 ? '' : 's'}.`,
+      `You answered ${questionsAnswered} question${questionsAnswered === 1 ? '' : 's'} yourself: ${answerSeconds} s away from the counter.`,
+      `Score: ${state.economy.score}. Wallet: ${wallet} coins.`,
+    ];
+    let title = 'Shift over';
+    if (currentMission !== null) {
+      const mission = MISSIONS[currentMission];
+      const results = mission.objectives.map((obj) => ({ label: obj.label, pass: obj.check(state) }));
+      const allPassed = results.every((r) => r.pass);
+      if (allPassed) {
+        completedMissions.add(currentMission);
+        title = `✓ ${mission.name} — Complete!`;
+      } else {
+        title = `${mission.name} — Not quite`;
+      }
+      lines.push(''); // visual separator
+      for (const r of results) {
+        lines.push(`${r.pass ? '✓' : '✗'} ${r.label}`);
+      }
+    }
+    ui.showOverlay({ title, lines, button: 'Continue' });
   }
 
   function showShop() {
@@ -283,9 +323,15 @@ export function createGame({ seed, ui, draw, reducedMotion = false }) {
     requestAnimationFrame(frame);
   }
 
-  function start() {
+  /**
+   * Start a shift. If missionIndex is given, uses that mission's shift config.
+   * @param {number | null} [missionIndex]
+   */
+  function start(missionIndex = null) {
+    currentMission = missionIndex;
     const preset = purchased.has('tapit-stand') ? 'test-stand' : 'none';
-    state = createInitialState({ seed, preset });
+    const shiftId = missionIndex !== null ? MISSIONS[missionIndex].shiftId : 'slice';
+    state = createInitialState({ seed, shiftId, preset });
     pending = [];
     commandLog = [];
     service = createService();
@@ -466,8 +512,25 @@ export function createGame({ seed, ui, draw, reducedMotion = false }) {
       else if (phase === 'ended') showShop();
       else if (phase === 'shop') {
         if (buyNextUpgrade()) showShop(); // Bought something — show updated shop.
-        else start(); // Nothing to buy — start next shift.
-      } else start();
+        else showMissionSelect(); // Nothing to buy — pick next mission.
+      } else if (phase === 'missionSelect') {
+        start(null); // "Free Play" button — use default slice shift.
+      } else if (phase === 'intro') {
+        showMissionSelect(); // intro → mission select
+      } else start(null);
+    },
+
+    /**
+     * A mission item was pressed in the mission-select overlay.
+     * @param {number} index
+     */
+    selectMission(index) {
+      if (phase !== 'missionSelect') return;
+      if (index < 0 || index >= MISSIONS.length) return;
+      // Only unlocked missions can be started.
+      const unlocked = index === 0 || completedMissions.has(index - 1);
+      if (!unlocked) return;
+      start(index);
     },
 
     /** @param {string | null} id */

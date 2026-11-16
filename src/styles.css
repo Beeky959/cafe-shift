@@ -393,6 +393,33 @@ kbd {
 
 .mainbtn:active { transform: translateY(2px); box-shadow: 0 3px 0 #2e2426; }
 
+.mission-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 14px;
+  border: 3px solid #3a2f32;
+  border-radius: 12px;
+  background: #fff5e6;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.mission-item:hover:not(:disabled) { background: #ffe8c6; }
+.mission-item:disabled { opacity: 0.5; cursor: default; }
+.mission-item[data-status="completed"] { border-color: #4a8c4a; background: #eaf5ea; }
+.mission-item[data-status="completed"]:hover { background: #ddeedd; }
+.mission-label { font-weight: 800; font-size: 15px; color: #241b20; }
+.mission-sublabel { font-size: 12px; color: #6b5e54; margin-top: 2px; }
+
+.objective { margin: 4px 0; font-size: 14px; line-height: 1.4; }
+.objective[data-pass="true"] { color: #3a7a3a; }
+.objective[data-pass="true"]::before { content: '✓ '; font-weight: bold; }
+.objective[data-pass="false"] { color: #9a3a3a; }
+.objective[data-pass="false"]::before { content: '✗ '; font-weight: bold; }
+
 /* ---- Phone held sideways: scene on the left; rail, strip and caption beside it. */
 @media (orientation: landscape) and (max-height: 480px) {
   .app {

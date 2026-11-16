@@ -60,6 +60,7 @@ function setAttr(node, name, value) {
  * @property {(slot: number) => void} onChip A chip in the action strip was pressed: 0 is the current action.
  * @property {() => void} onPause
  * @property {() => void} onOverlayButton
+ * @property {(index: number) => void} onOverlayItem
  */
 
 /**
@@ -314,14 +315,14 @@ export function createUi(handlers) {
       if (slot >= 0 && slot < RAIL_SLOTS) receipts[slot] = { text, until };
     },
 
-    /** @param {'intro' | 'playing' | 'paused' | 'ended' | 'shop'} phase */
+    /** @param {'intro' | 'missionSelect' | 'playing' | 'paused' | 'ended' | 'shop'} phase */
     setPhase(phase) {
       app.dataset.phase = phase;
       setText(pause, phase === 'paused' ? 'Resume' : 'Pause');
-      pause.disabled = phase === 'intro' || phase === 'ended' || phase === 'shop';
+      pause.disabled = phase !== 'playing' && phase !== 'paused';
       playing = phase === 'playing';
       for (const button of targetButtons.values()) button.disabled = !playing;
-      if (phase === 'intro' || phase === 'ended' || phase === 'shop') {
+      if (phase === 'intro' || phase === 'missionSelect' || phase === 'ended' || phase === 'shop') {
         lastWallet = 0;
         lastHappy = 0;
         lastLost = 0;
@@ -331,7 +332,7 @@ export function createUi(handlers) {
     },
 
     /**
-     * @param {{ title: string, lines: string[], button: string } | null} content Null hides the overlay.
+     * @param {{ title: string, lines: string[], button: string, items?: { label: string, sublabel: string, status: 'locked' | 'available' | 'completed' }[] } | null} content Null hides the overlay.
      */
     showOverlay(content) {
       if (content === null) {
@@ -339,13 +340,33 @@ export function createUi(handlers) {
         return;
       }
       setText(overlayTitle, content.title);
-      overlayBody.replaceChildren(
-        ...content.lines.map((line) => {
-          const p = document.createElement('p');
-          p.textContent = line;
-          return p;
-        }),
-      );
+      /** @type {Element[]} */
+      const children = content.lines.map((line) => {
+        const p = document.createElement('p');
+        p.textContent = line;
+        return p;
+      });
+      if (content.items) {
+        for (let i = 0; i < content.items.length; i++) {
+          const item = content.items[i];
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'mission-item';
+          btn.dataset.status = item.status;
+          btn.disabled = item.status === 'locked';
+          const label = document.createElement('span');
+          label.className = 'mission-label';
+          label.textContent = item.status === 'completed' ? `✓ ${item.label}` : item.status === 'locked' ? `🔒 ${item.label}` : item.label;
+          const sub = document.createElement('span');
+          sub.className = 'mission-sublabel';
+          sub.textContent = item.sublabel;
+          btn.append(label, sub);
+          const idx = i;
+          btn.addEventListener('click', () => handlers.onOverlayItem(idx));
+          children.push(btn);
+        }
+      }
+      overlayBody.replaceChildren(...children);
       setText(overlayButton, content.button);
       overlay.hidden = false;
       overlayButton.focus();
