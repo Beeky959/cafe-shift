@@ -27,6 +27,7 @@ export const NEAR_MISS = 16;
  * @property {number} h
  * @property {string} key Keyboard shortcut.
  * @property {number} rank Tie-break order for equally near taps; lower wins.
+ * @property {boolean} [info] Info-only area: smaller sizes allowed, overlaps with stations tolerated.
  */
 
 /** @type {readonly HitArea[]} */
@@ -40,6 +41,8 @@ export const HIT_AREAS = Object.freeze([
   { id: 'table-1', target: { kind: 'table', tableId: 1 }, x: 60, y: 575, w: 180, h: 135, key: '7', rank: 4 },
   { id: 'table-2', target: { kind: 'table', tableId: 2 }, x: 390, y: 575, w: 180, h: 135, key: '8', rank: 4 },
   { id: 'table-3', target: { kind: 'table', tableId: 3 }, x: 720, y: 575, w: 180, h: 135, key: '9', rank: 4 },
+  { id: 'oven', target: { kind: 'oven' }, x: 180, y: 190, w: 80, h: 80, key: '0', rank: 5, info: true },
+  { id: 'stand', target: { kind: 'stand' }, x: 832, y: 380, w: 128, h: 170, key: 's', rank: 5, info: true },
 ]);
 
 /**

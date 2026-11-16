@@ -19,8 +19,8 @@ import { resolveTap, isDrink } from '../sim/index.js';
 import { HIT_AREAS, SCENE_HEIGHT, SCENE_WIDTH } from './scene.js';
 import * as art from './art.js';
 import { CAST, OWNER, byte, person, sparkle } from './characters.js';
-import { STAGE, clothAt, guestClip, machineClip, ovenClip, ownerClip, passClip, seatOf, sinkClip, tableCentre, tableDirt } from './clips.js';
-import { PROPS, chair, cloth, cupWithFill, dishInHand, drawBackground, drawForeground, drawLightGlow, drawMachine, drawOven, drawPass, drawRack, drawSink, drawTableTop, steam } from './props.js';
+import { STAGE, clothAt, guestClip, machineClip, ovenClip, ownerClip, passClip, seatOf, sinkClip, standClip, tableCentre, tableDirt } from './clips.js';
+import { PROPS, chair, cloth, cupWithFill, dishInHand, drawBackground, drawForeground, drawLightGlow, drawMachine, drawOven, drawPass, drawRack, drawSink, drawStand, drawTableTop, steam } from './props.js';
 import { phases, smooth as smoothU, easeOut, easeOutBack, anticipateSettle, bounce, arc, secondaryBob, secondarySwing, hipShift, shoulderCounter } from './anim-utils.js';
 
 export { SCENE_HEIGHT, SCENE_WIDTH };
@@ -252,6 +252,11 @@ export function createRenderer(canvas) {
       floor.push({ y: at.y, draw: () => drawGhost(ghost, at, time, motion, anim) });
     }
     if (!ownerBehind) floor.push({ y: O.y, draw: () => person(cx, O.x, O.y, 1, OWNER, ownerPose()) });
+    // ---- TapIt Stand kiosk on the customer floor.
+    const stClip = standClip(state);
+    if (stClip.installed) {
+      floor.push({ y: PROPS.stand.y + PROPS.stand.h, draw: () => drawStand(cx, stClip) });
+    }
     floor.sort((a, b) => a.y - b.y);
     for (const item of floor) item.draw();
 
@@ -373,6 +378,20 @@ export function createRenderer(canvas) {
         cx.restore();
         art.oval(cx, f.x, f.y - t * 20, 16 + t * 10, 16 + t * 10, '#6b3a36');
         art.textAt(cx, '×', f.x, f.y + 8 - t * 20, 26, '#ffccc6', 1000);
+        cx.globalAlpha = 1;
+      } else if (f.type === 'standUse' && f.x !== undefined && f.y !== undefined) {
+        // NFC tap ripple effect at the stand
+        cx.globalAlpha = 1 - t;
+        for (let i = 0; i < 3; i++) {
+          const delay = i * 0.2;
+          const rt = Math.max(0, Math.min(1, (t - delay) / (1 - delay)));
+          if (rt <= 0) continue;
+          cx.strokeStyle = `rgba(26,106,255,${(1 - rt) * 0.5})`;
+          cx.lineWidth = 2;
+          cx.beginPath();
+          cx.arc(f.x, f.y, 8 + rt * 20, 0, Math.PI * 2);
+          cx.stroke();
+        }
         cx.globalAlpha = 1;
       }
     }
@@ -972,6 +991,26 @@ export function createRenderer(canvas) {
       else pose.rightHand = { x: -18, y: -118 };
       face.lookX = 0.4;
       face.lookY = -0.4;
+    }
+    if (clip.kind === 'toStand') {
+      // Walking to the stand — phone in hand, looking toward it
+      pose.crossedArms = false;
+      pose.rightHand = { x: -12, y: -100 };
+      pose.holdRight = (c, x, y) => art.phone(c, x, y - 4, 22);
+      face.lookX = 0.5;
+      face.lookY = 0;
+      face.mouth = 'smile';
+    }
+    if (clip.kind === 'atStand') {
+      // At the stand — tapping phone against kiosk NFC
+      const tap = Math.sin(time * 6 + phase) * 0.5;
+      pose.crossedArms = false;
+      pose.rightHand = { x: -20 + tap * motion, y: -110 };
+      pose.holdRight = (c, x, y) => art.phone(c, x, y - 4, 22);
+      pose.facing = -1; // Face the stand
+      face.lookX = -0.3;
+      face.lookY = -0.3;
+      face.mouth = 'smile';
     }
     if (clip.attended && clip.kind === 'wait') {
       // Being served: hands ready to take it.

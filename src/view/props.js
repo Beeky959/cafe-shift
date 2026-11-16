@@ -37,6 +37,7 @@ export const PROPS = Object.freeze({
   sink: { x: 762, y: 230, w: 140, h: 40, basin: { x: 832, y: 252 }, tap: { x: 822, y: 214 } },
   rack: { x: 770, y: 182, w: 132 },
   window: { x: 462, y: 56, w: 256, h: 122 },
+  stand: { x: 908, y: 400, w: 44, h: 80 },
 });
 
 /**
@@ -540,6 +541,80 @@ export function drawOven(cx, look) {
     cx.fillStyle = halo;
     cx.fillRect(o.x - 30, o.y - 20, o.w + 60, o.h + 40);
   }
+}
+
+/**
+ * Draw the TapIt Smart Café kiosk stand on the customer floor.
+ *
+ * @typedef {object} StandLook
+ * @property {boolean} installed
+ * @property {boolean} inUse
+ * @property {number} queueLength
+ * @property {number} progress
+ *
+ * @param {Ctx} cx
+ * @param {StandLook} look
+ */
+export function drawStand(cx, look) {
+  if (!look.installed) return;
+  const s = PROPS.stand;
+
+  // Pole / pedestal
+  cx.fillStyle = '#8a8a8a';
+  rounded(cx, s.x + s.w / 2 - 4, s.y + 26, 8, s.h - 26, 2, '#8a8a8a');
+  // Base plate
+  cx.fillStyle = '#707070';
+  rounded(cx, s.x + 2, s.y + s.h - 6, s.w - 4, 6, 2, '#707070');
+
+  // Tablet screen — angled slightly
+  const screenW = s.w - 4;
+  const screenH = 30;
+  const screenX = s.x + 2;
+  const screenY = s.y;
+  // Screen bezel
+  rounded(cx, screenX - 1, screenY - 1, screenW + 2, screenH + 2, 4, '#2a2a2a');
+  // Screen face — glowing when in use
+  const screenFill = look.inUse ? '#1a6aff' : '#222838';
+  rounded(cx, screenX, screenY, screenW, screenH, 3, screenFill);
+
+  if (look.inUse) {
+    // NFC/tap ripple animation based on progress
+    cx.save();
+    const centerX = screenX + screenW / 2;
+    const centerY = screenY + screenH / 2;
+    // Pulsing NFC icon — three arcs
+    const phase = (look.progress * 4) % 1;
+    cx.strokeStyle = `rgba(255,255,255,${0.5 + 0.3 * Math.sin(phase * Math.PI * 2)})`;
+    cx.lineWidth = 1.5;
+    for (let i = 0; i < 3; i++) {
+      const r = 4 + i * 4;
+      const alpha = Math.max(0, 1 - Math.abs(phase - i * 0.3) * 2);
+      cx.strokeStyle = `rgba(255,255,255,${alpha * 0.8})`;
+      cx.beginPath();
+      cx.arc(centerX, centerY, r, -Math.PI * 0.4, Math.PI * 0.4);
+      cx.stroke();
+    }
+    // Progress bar at bottom of screen
+    cx.fillStyle = 'rgba(255,255,255,0.3)';
+    cx.fillRect(screenX + 2, screenY + screenH - 4, screenW - 4, 2);
+    cx.fillStyle = '#4aff8a';
+    cx.fillRect(screenX + 2, screenY + screenH - 4, (screenW - 4) * look.progress, 2);
+    cx.restore();
+  } else {
+    // Idle screen — TapIt logo text
+    cx.fillStyle = '#6a8aaa';
+    cx.font = 'bold 8px monospace';
+    cx.textAlign = 'center';
+    cx.fillText('TapIt', screenX + screenW / 2, screenY + screenH / 2 + 3);
+    cx.textAlign = 'left';
+  }
+
+  // Small NFC symbol below the screen
+  cx.fillStyle = '#50c878';
+  cx.font = '7px monospace';
+  cx.textAlign = 'center';
+  cx.fillText('NFC', s.x + s.w / 2, s.y + screenH + 10);
+  cx.textAlign = 'left';
 }
 
 /**

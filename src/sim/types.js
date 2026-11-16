@@ -250,6 +250,7 @@
  *   | { kind: 'case' }
  *   | { kind: 'sink' }
  *   | { kind: 'oven' }
+ *   | { kind: 'stand' }
  *   | { kind: 'spot', index: number }
  *   | { kind: 'table', tableId: number }} Target
  */

@@ -34,6 +34,15 @@ export const STAGE = Object.freeze({
     { x: 850, y: 560 },
     { x: 898, y: 546 },
   ]),
+  /** TapIt stand kiosk position and guest queue positions. */
+  stand: Object.freeze({
+    kiosk: { x: 920, y: 440 },
+    queue: [
+      { x: 920, y: 500 },
+      { x: 920, y: 540 },
+      { x: 900, y: 570 },
+    ],
+  }),
   byte: { x: 742, y: 150 },
 });
 
@@ -202,6 +211,32 @@ export function ovenClip(state) {
 }
 
 /**
+ * @typedef {object} StandClip
+ * @property {boolean} installed
+ * @property {boolean} inUse  A guest is actively using the stand.
+ * @property {number} queueLength  How many guests are waiting at or walking to the stand.
+ * @property {number} progress  0-1 for the active user's session.
+ */
+
+/**
+ * @param {SimState} state
+ * @returns {StandClip}
+ */
+export function standClip(state) {
+  const stand = state.stand;
+  const activeGuest = stand.userId !== null ? state.guests.find((g) => g.id === stand.userId) : null;
+  const progress = activeGuest && activeGuest.state === 'atStand'
+    ? Math.max(0, Math.min(1, 1 - activeGuest.timerLeft / state.timing.standUse))
+    : 0;
+  return {
+    installed: stand.installed,
+    inUse: stand.userId !== null,
+    queueLength: stand.queue.length,
+    progress,
+  };
+}
+
+/**
  * @param {SimState} state
  * @returns {{ plated: boolean, claimed: boolean }}
  */
@@ -243,7 +278,7 @@ export function tableDirt(state, tableId) {
 
 /**
  * @typedef {object} GuestClip
- * @property {'enter' | 'wait' | 'ask' | 'door' | 'toTable' | 'seated' | 'standing'} kind
+ * @property {'enter' | 'wait' | 'ask' | 'door' | 'toTable' | 'seated' | 'standing' | 'toStand' | 'atStand'} kind
  * @property {number} progress 0-1 for timed walks.
  * @property {'calm' | 'impatient' | 'anxious'} mood From the patience left.
  * @property {boolean} attended The owner is serving or answering them right now.
@@ -273,6 +308,10 @@ export function guestClip(state, guest) {
       return { kind: 'toTable', progress: Math.max(0, Math.min(1, 1 - guest.timerLeft / t.walkToTable)), mood, attended };
     case 'seated':
       return { kind: 'seated', progress: 0, mood, attended };
+    case 'walkingToStand':
+      return { kind: 'toStand', progress: Math.max(0, Math.min(1, 1 - guest.timerLeft / t.walkToStand)), mood, attended };
+    case 'atStand':
+      return { kind: 'atStand', progress: 0, mood, attended };
     default:
       return { kind: 'standing', progress: 0, mood, attended };
   }
@@ -297,6 +336,13 @@ export function guestHome(state, guest) {
   }
   if (p.kind === 'door') return STAGE.doorQueue[Math.max(0, state.doorQueue.indexOf(guest.id))] ?? STAGE.doorQueue[0];
   if (p.kind === 'table') return seatOf(p.tableId);
+  if (p.kind === 'stand') {
+    // First in queue stands at the kiosk, rest queue behind
+    const queueIndex = state.stand.queue.indexOf(guest.id);
+    if (queueIndex === 0 && state.stand.userId === guest.id) return STAGE.stand.kiosk;
+    const qi = Math.max(0, queueIndex);
+    return STAGE.stand.queue[qi % STAGE.stand.queue.length];
+  }
   const standing = state.guests.filter((g) => g.place.kind === 'standing');
   return STAGE.standing[Math.max(0, standing.indexOf(guest)) % STAGE.standing.length];
 }

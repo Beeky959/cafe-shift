@@ -260,6 +260,22 @@ export function createAnimator() {
           case 'drinkDiscarded':
             add('discarded', 600, { x: PROPS.machine.cup.x, y: PROPS.machine.cup.y });
             break;
+          case 'guestToStand':
+            // Guest heading to the TapIt stand — small pop effect
+            add('standPop', 350, { guestId: id });
+            break;
+          case 'guestUsingStand':
+            // Guest started using the stand
+            add('standUse', 500, { x: PROPS.stand.x + PROPS.stand.w / 2, y: PROPS.stand.y - 10 });
+            break;
+          case 'standAnswered': {
+            // Guest got their answer from the stand
+            const gx = body?.x ?? PROPS.stand.x + PROPS.stand.w / 2;
+            const gy = body?.y ?? PROPS.stand.y + PROPS.stand.h;
+            add('answered', 900, { x: gx, y: gy - 130, guestId: id });
+            if (body) body.joyUntil = clock + 800;
+            break;
+          }
           case 'actionCancelled':
             if (e.reason === 'player') add('cancelled', 320, { x: owner.x, y: owner.y - 170 });
             break;

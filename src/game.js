@@ -23,7 +23,7 @@ const NOTICE_MS = 2200;
 /** A press that moves less than this, in scene units, is a tap, not a drag. */
 const DRAG_THRESHOLD = 24;
 
-/** @typedef {'intro' | 'playing' | 'paused' | 'ended'} GamePhase */
+/** @typedef {'intro' | 'playing' | 'paused' | 'ended' | 'shop'} GamePhase */
 /** @typedef {import('./ui/byte.js').Mood} Mood */
 
 /**
@@ -37,6 +37,19 @@ const DRAG_THRESHOLD = 24;
  */
 
 /**
+ * @typedef {object} Upgrade
+ * @property {string} id
+ * @property {string} name
+ * @property {string} desc
+ * @property {number} cost
+ */
+
+/** @type {readonly Upgrade[]} */
+const UPGRADES = Object.freeze([
+  { id: 'tapit-stand', name: 'TapIt Stand', desc: 'Guests answer their own digital questions at a kiosk — no more counter delays.', cost: 80 },
+]);
+
+/**
  * @param {object} deps
  * @param {number} deps.seed
  * @param {GameUi} deps.ui
@@ -44,6 +57,12 @@ const DRAG_THRESHOLD = 24;
  * @param {boolean} [deps.reducedMotion] The player asked their device for less motion.
  */
 export function createGame({ seed, ui, draw, reducedMotion = false }) {
+  /** Coins that carry over between shifts. */
+  let wallet = 0;
+  /** Upgrades purchased across shifts. */
+  /** @type {Set<string>} */
+  const purchased = new Set();
+
   /** @type {SimState} */
   let state = createInitialState({ seed });
   /** @type {GamePhase} */
@@ -111,18 +130,52 @@ export function createGame({ seed, ui, draw, reducedMotion = false }) {
 
   function showResults() {
     const g = state.metrics.guests;
+    const earned = state.economy.grossEarnings;
+    wallet += earned;
     const answerSeconds = Math.round((state.metrics.ownerTicks.answer / TICKS_PER_SECOND) * 10) / 10;
     ui.showOverlay({
       title: 'Shift over',
       lines: [
         `${g.leftHappy} of ${state.schedule.length} guests left happy.`,
-        `${state.economy.grossEarnings} coins earned, including ${state.metrics.tips} tip${state.metrics.tips === 1 ? '' : 's'}.`,
+        `${earned} coins earned, including ${state.metrics.tips} tip${state.metrics.tips === 1 ? '' : 's'}.`,
         `You answered ${questionsAnswered} question${questionsAnswered === 1 ? '' : 's'} yourself: ${answerSeconds} s away from the counter.`,
-        `Score: ${state.economy.score}.`,
-        'Coins and scores are part of the game only.',
+        `Score: ${state.economy.score}. Wallet: ${wallet} coins.`,
       ],
-      button: 'Play again',
+      button: 'Upgrade Shop',
     });
+  }
+
+  function showShop() {
+    setPhase('shop');
+    const available = UPGRADES.filter((u) => !purchased.has(u.id));
+    const lines = available.length === 0
+      ? [`All upgrades purchased! Wallet: ${wallet} coins.`]
+      : available.map((u) => {
+          const affordable = wallet >= u.cost;
+          return `${u.name} — ${u.cost} coins ${affordable ? '✓' : '(need ' + (u.cost - wallet) + ' more)'}. ${u.desc}`;
+        });
+    lines.push(`Wallet: ${wallet} coins.`);
+    ui.showOverlay({
+      title: 'Upgrade Shop',
+      lines,
+      button: available.length > 0 && wallet >= available[0].cost ? `Buy ${available[0].name}` : 'Start next shift',
+    });
+  }
+
+  /**
+   * Buy the first affordable unpurchased upgrade from the shop.
+   * @returns {boolean} Whether something was bought.
+   */
+  function buyNextUpgrade() {
+    for (const u of UPGRADES) {
+      if (purchased.has(u.id)) continue;
+      if (wallet >= u.cost) {
+        wallet -= u.cost;
+        purchased.add(u.id);
+        return true;
+      }
+    }
+    return false;
   }
 
   /** Byte's caption mood, as a face. @type {Readonly<Record<Mood, import('./view/animator.js').ByteExpression>>} */
@@ -231,7 +284,8 @@ export function createGame({ seed, ui, draw, reducedMotion = false }) {
   }
 
   function start() {
-    state = createInitialState({ seed });
+    const preset = purchased.has('tapit-stand') ? 'test-stand' : 'none';
+    state = createInitialState({ seed, preset });
     pending = [];
     commandLog = [];
     service = createService();
@@ -409,7 +463,11 @@ export function createGame({ seed, ui, draw, reducedMotion = false }) {
 
     overlayButton() {
       if (phase === 'paused') togglePause();
-      else start();
+      else if (phase === 'ended') showShop();
+      else if (phase === 'shop') {
+        if (buyNextUpgrade()) showShop(); // Bought something — show updated shop.
+        else start(); // Nothing to buy — start next shift.
+      } else start();
     },
 
     /** @param {string | null} id */

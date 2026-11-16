@@ -30,6 +30,8 @@ const REJECTIONS = {
   tableNotDirty: 'That table does not need wiping.',
   alreadyQueued: 'That is already on your list.',
   queueFull: 'Your list is full. Finish or remove something first.',
+  ovenBusy: 'The oven is busy.',
+  standInfo: 'The TapIt Stand answers guest questions automatically.',
 };
 
 /**
@@ -111,6 +113,14 @@ export function describeTarget(state, target) {
     case 'oven': {
       const oven = state.oven;
       return `Oven: ${oven.state}. ${outcome}`;
+    }
+    case 'stand': {
+      const queued = state.stand.queue.length;
+      const status = !state.stand.installed ? 'not installed'
+        : state.stand.userId !== null ? `in use, ${queued} in queue`
+        : queued > 0 ? `${queued} waiting`
+        : 'idle';
+      return `TapIt Stand: ${status}. ${outcome}`;
     }
     default: {
       const table = state.tables.find((t) => t.id === target.tableId);

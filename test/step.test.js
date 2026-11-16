@@ -417,6 +417,9 @@ test('working out what a tap means does not change the state', () => {
   assert.equal(digest(d.state), before);
 });
 
-test('the stand has no rules in this milestone', () => {
-  assert.throws(() => step(createInitialState({ preset: 'test-stand' })), /M4/);
+test('the stand preset runs without throwing', () => {
+  const state = createInitialState({ preset: 'test-stand' });
+  assert.strictEqual(state.stand.installed, true);
+  const events = step(state);
+  assert.ok(Array.isArray(events));
 });

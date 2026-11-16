@@ -59,8 +59,9 @@ test('only the game loop advances the simulation; the view and the interface nev
   }
 });
 
-test('TapIt is drawings only: the game does not import its components yet', async () => {
-  for (const file of ['main.js', 'game.js', 'view/renderer.js', 'view/props.js', 'view/characters.js', 'view/animator.js', 'view/clips.js', 'ui/dom.js', 'ui/service.js', 'ui/byte.js']) {
+test('TapIt stand references are limited to view and UI files that need them', async () => {
+  // Feature B integrates TapIt into the game. Only files that should NOT reference it are checked.
+  for (const file of ['main.js', 'view/characters.js']) {
     const code = stripComments(await readFile(new URL(`../src/${file}`, import.meta.url), 'utf8'));
     assert.equal(/tapit/i.test(code), false, `${file} refers to TapIt`);
   }

@@ -314,14 +314,14 @@ export function createUi(handlers) {
       if (slot >= 0 && slot < RAIL_SLOTS) receipts[slot] = { text, until };
     },
 
-    /** @param {'intro' | 'playing' | 'paused' | 'ended'} phase */
+    /** @param {'intro' | 'playing' | 'paused' | 'ended' | 'shop'} phase */
     setPhase(phase) {
       app.dataset.phase = phase;
       setText(pause, phase === 'paused' ? 'Resume' : 'Pause');
-      pause.disabled = phase === 'intro' || phase === 'ended';
+      pause.disabled = phase === 'intro' || phase === 'ended' || phase === 'shop';
       playing = phase === 'playing';
       for (const button of targetButtons.values()) button.disabled = !playing;
-      if (phase === 'intro' || phase === 'ended') {
+      if (phase === 'intro' || phase === 'ended' || phase === 'shop') {
         lastWallet = 0;
         lastHappy = 0;
         lastLost = 0;

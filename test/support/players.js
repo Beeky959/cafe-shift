@@ -239,17 +239,51 @@ export function summarise(state) {
  * Plays the slice shift once with each scripted player.
  * @param {number} seed
  * @param {typeof import('../../src/sim/index.js').runShift} runShift
+ * @param {import('../../src/sim/state.js').InitOptions} [extraOpts]
  * @returns {Record<PlayerKind, Summary>}
  */
-export function playShift(seed, runShift) {
+export function playShift(seed, runShift, extraOpts) {
   /** @param {PlayerKind} kind */
-  const play = (kind) => summarise(runShift({ seed }, createPlayer(kind)).state);
+  const play = (kind) => summarise(runShift({ seed, ...extraOpts }, createPlayer(kind)).state);
   return {
     idle: play('idle'),
     arrivalOrder: play('arrivalOrder'),
     priority: play('priority'),
     fastPriority: play('fastPriority'),
   };
+}
+
+/**
+ * Balance gates B5-B6 (stand comparison).
+ * Compares priority-player metrics with stand OFF vs stand ON.
+ * @param {Record<PlayerKind, Summary>} off Results without stand.
+ * @param {Record<PlayerKind, Summary>} on Results with stand.
+ * @returns {{ id: string, label: string, pass: boolean, detail: string }[]}
+ */
+export function evaluateStandGates(off, on) {
+  const pct = (/** @type {number} */ n) => `${Math.round(n * 100)}%`;
+  const offAnswer = off.priority.answerSeconds;
+  const onAnswer = on.priority.answerSeconds;
+  const answerReduction = offAnswer === 0 ? 0 : 1 - onAnswer / offAnswer;
+
+  const offServed = off.priority.served;
+  const onServed = on.priority.served;
+  const serveDelta = offServed === 0 ? 0 : (onServed - offServed) / offServed;
+
+  return [
+    {
+      id: 'B5',
+      label: 'the TapIt stand reduces owner answering time by at least 30%',
+      pass: answerReduction >= 0.3,
+      detail: `answering ${offAnswer.toFixed(1)}s → ${onAnswer.toFixed(1)}s (reduced ${pct(answerReduction)})`,
+    },
+    {
+      id: 'B6',
+      label: 'the TapIt stand improves guest throughput (more served or fewer unhappy)',
+      pass: onServed >= offServed && on.priority.leftUnhappy <= off.priority.leftUnhappy,
+      detail: `served ${offServed}→${onServed}, unhappy ${off.priority.leftUnhappy}→${on.priority.leftUnhappy}, gross ${off.priority.gross}→${on.priority.gross}`,
+    },
+  ];
 }
 
 /**

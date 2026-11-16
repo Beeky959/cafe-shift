@@ -191,6 +191,9 @@ export function resolveTap(state, target) {
       if (oven.state === 'empty' && oven.claimedBy === null) return yes('bakeLoad');
       return no('ovenBusy');
     }
+    case 'stand':
+      // Tapping the stand shows info but never resolves an action.
+      return no('standInfo');
     default:
       return no('unknownTarget');
   }
@@ -284,6 +287,10 @@ function removeGuest(state, guest) {
   const p = guest.place;
   if (p.kind === 'spot') state.spots[p.index] = null;
   if (p.kind === 'door') state.doorQueue = state.doorQueue.filter((id) => id !== guest.id);
+  if (p.kind === 'stand') {
+    state.stand.queue = state.stand.queue.filter((id) => id !== guest.id);
+    if (state.stand.userId === guest.id) state.stand.userId = null;
+  }
   if (p.kind === 'table') {
     const table = state.tables.find((t) => t.id === p.tableId);
     if (table) {
@@ -563,9 +570,20 @@ function completeAction(state, action, emit, freshBrews) {
       state.metrics.guests.served += 1;
       emit('itemHandedOver', { guestId: guest.id, item: spec.order, coins: price });
       if (spec.question) {
-        guest.state = 'asking';
-        guest.patienceLeft = state.timing.askingPatience;
-        emit('guestAsked', { guestId: guest.id, topic: spec.question.topic });
+        // Does this guest use the stand?
+        if (state.stand.installed && spec.question.supported && spec.usesStandIfPresent) {
+          // Guest walks to the stand instead of asking the owner.
+          if (guest.place.kind === 'spot') state.spots[guest.place.index] = null;
+          guest.place = { kind: 'stand' };
+          guest.state = 'walkingToStand';
+          guest.timerLeft = state.timing.walkToStand;
+          state.stand.queue.push(guest.id);
+          emit('guestToStand', { guestId: guest.id, topic: spec.question.topic });
+        } else {
+          guest.state = 'asking';
+          guest.patienceLeft = state.timing.askingPatience;
+          emit('guestAsked', { guestId: guest.id, topic: spec.question.topic });
+        }
       } else {
         leaveCounter(state, guest, emit);
       }
@@ -703,6 +721,37 @@ function stepGuests(state, emit) {
           emit('guestSeated', { guestId: guest.id });
         }
         break;
+      case 'walkingToStand':
+        guest.timerLeft -= 1;
+        if (guest.timerLeft <= 0) {
+          guest.timerLeft = 0;
+          // If this guest is first in the stand queue, they start using it.
+          if (state.stand.queue[0] === guest.id && state.stand.userId === null) {
+            state.stand.userId = guest.id;
+            guest.state = 'atStand';
+            guest.timerLeft = state.timing.standUse;
+            emit('guestUsingStand', { guestId: guest.id });
+          } else {
+            // Wait in the stand queue (state stays walkingToStand with timerLeft 0 → effectively waiting).
+            guest.state = 'atStand';
+            guest.timerLeft = 0; // Will be set when they become the active user.
+          }
+        }
+        break;
+      case 'atStand':
+        // Active user: timer ticking down. Waiting guests: timer is 0, no tick.
+        if (state.stand.userId === guest.id) {
+          guest.timerLeft -= 1;
+          if (guest.timerLeft <= 0) {
+            guest.timerLeft = 0;
+            // Done using the stand.
+            state.stand.userId = null;
+            state.stand.queue = state.stand.queue.filter((id) => id !== guest.id);
+            emit('standAnswered', { guestId: guest.id });
+            leaveCounter(state, guest, emit);
+          }
+        }
+        break;
       case 'seated':
       case 'standing':
         guest.timerLeft -= 1;
@@ -712,9 +761,26 @@ function stepGuests(state, emit) {
         }
         break;
       default:
-        throw new Error(`Guest ${guest.id} is in state ${guest.state}, which needs the stand (M4)`);
+        break;
     }
   }
+}
+
+/**
+ * Promotes the next guest in the stand queue to start using it.
+ * Called after stepGuests so that a finished user is removed first.
+ * @param {SimState} state
+ * @param {Emit} emit
+ */
+function stepStand(state, emit) {
+  if (!state.stand.installed || state.stand.userId !== null) return;
+  if (state.stand.queue.length === 0) return;
+  const nextId = state.stand.queue[0];
+  const guest = state.guests.find((g) => g.id === nextId);
+  if (!guest || guest.state !== 'atStand') return; // Still walking
+  state.stand.userId = guest.id;
+  guest.timerLeft = state.timing.standUse;
+  emit('guestUsingStand', { guestId: guest.id });
 }
 
 /**
@@ -798,6 +864,9 @@ function endShift(state, emit) {
   if (state.pass.dishId !== null) dishOf(state, state.pass.dishId).holder = { kind: 'rack' };
   state.pass.dishId = null;
   state.pass.claimedBy = null;
+  // Clear stand queue.
+  state.stand.userId = null;
+  state.stand.queue = [];
   // 3. Settle the guests who are still enjoying their order.
   for (const guest of [...state.guests]) leaveHappy(state, guest, emit);
 
@@ -822,9 +891,6 @@ function endShift(state, emit) {
  * @returns {SimEvent[]} What happened, in order.
  */
 export function step(state, commands = []) {
-  if (state.stand.installed) {
-    throw new Error('The stand has no rules yet: they arrive in M4. Use the "none" preset.');
-  }
   /** @type {SimEvent[]} */
   const events = [];
   if (state.phase === 'ended') return events;
@@ -847,6 +913,7 @@ export function step(state, commands = []) {
   stepMachine(state, emit, freshBrews); // 3
   stepOven(state, emit, freshBake); // 3b
   stepGuests(state, emit); // 4
+  stepStand(state, emit); // 4b
   promoteFromDoor(state, emit); // 5
   if (state.phase === 'open') admitArrivals(state, emit); // 6
 
@@ -867,7 +934,7 @@ export function step(state, commands = []) {
   }
   if (
     state.phase === 'closing' &&
-    !state.guests.some((g) => g.state === 'walkingIn' || g.state === 'waiting' || g.state === 'asking')
+    !state.guests.some((g) => g.state === 'walkingIn' || g.state === 'waiting' || g.state === 'asking' || g.state === 'walkingToStand' || g.state === 'atStand')
   ) {
     endShift(state, emit);
   }

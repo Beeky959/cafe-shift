@@ -284,6 +284,8 @@ test('Byte\'s face follows its lines, settles back, and stays worried while a gu
   }
 });
 
-test('nothing on screen depends on unseeded randomness: the stand preset is still refused', () => {
-  assert.throws(() => step(createInitialState({ preset: 'test-stand' })), /M4/);
+test('nothing on screen depends on unseeded randomness: the stand preset runs', () => {
+  const state = createInitialState({ preset: 'test-stand' });
+  assert.strictEqual(state.stand.installed, true);
+  step(state); // should not throw
 });
