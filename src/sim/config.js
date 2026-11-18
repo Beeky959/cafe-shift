@@ -91,7 +91,7 @@ export const CONFIG = deepFreeze({
     walkToTable: 0.8,
     walkToStand: 0.6,
     standUse: 1.5,
-    counterPatience: 24,
+    counterPatience: 32,
     askingPatience: 14,
     standingConsume: 4,
   },

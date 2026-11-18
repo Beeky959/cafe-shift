@@ -33,7 +33,7 @@ export const NEAR_MISS = 16;
 /** @type {readonly HitArea[]} */
 export const HIT_AREAS = Object.freeze([
   { id: 'machine', target: { kind: 'machine' }, x: 40, y: 150, w: 180, h: 170, key: '1', rank: 1 },
-  { id: 'case', target: { kind: 'case' }, x: 250, y: 150, w: 180, h: 170, key: '2', rank: 2 },
+  { id: 'case', target: { kind: 'case' }, x: 300, y: 150, w: 180, h: 170, key: '2', rank: 2 },
   { id: 'sink', target: { kind: 'sink' }, x: 740, y: 150, w: 180, h: 170, key: '3', rank: 3 },
   { id: 'spot-0', target: { kind: 'spot', index: 0 }, x: 240, y: 380, w: 150, h: 170, key: '4', rank: 0 },
   { id: 'spot-1', target: { kind: 'spot', index: 1 }, x: 412, y: 380, w: 150, h: 170, key: '5', rank: 0 },
@@ -41,7 +41,7 @@ export const HIT_AREAS = Object.freeze([
   { id: 'table-1', target: { kind: 'table', tableId: 1 }, x: 60, y: 575, w: 180, h: 135, key: '7', rank: 4 },
   { id: 'table-2', target: { kind: 'table', tableId: 2 }, x: 390, y: 575, w: 180, h: 135, key: '8', rank: 4 },
   { id: 'table-3', target: { kind: 'table', tableId: 3 }, x: 720, y: 575, w: 180, h: 135, key: '9', rank: 4 },
-  { id: 'oven', target: { kind: 'oven' }, x: 180, y: 190, w: 80, h: 80, key: '0', rank: 5, info: true },
+  { id: 'oven', target: { kind: 'oven' }, x: 220, y: 190, w: 80, h: 80, key: '0', rank: 5, info: true },
   { id: 'stand', target: { kind: 'stand' }, x: 832, y: 380, w: 128, h: 170, key: 's', rank: 5, info: true },
 ]);
 
@@ -97,7 +97,7 @@ export const PLACES = Object.freeze({
   /** Where the owner stands for each zone. */
   owner: /** @type {Readonly<Record<string, { x: number, y: number }>>} */ ({
     machine: { x: 150, y: 300 },
-    case: { x: 340, y: 300 },
+    case: { x: 400, y: 300 },
     counter: { x: 560, y: 300 },
     sink: { x: 800, y: 300 },
     floor: { x: 480, y: 610 },

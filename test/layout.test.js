@@ -71,13 +71,14 @@ test('a near miss selects the nearest area; a clear miss selects nothing', () =>
   assert.equal(hitTest(machine.x - NEAR_MISS, machine.y + 50)?.id, 'machine');
   assert.equal(hitTest(machine.x - NEAR_MISS - 1, machine.y + 50), null);
   assert.equal(hitTest(machine.x + 60, machine.y - NEAR_MISS)?.id, 'machine');
-  // Between the machine and the pastry case, 30 units apart: the oven info area
-  // overlaps this gap, so the oven wins there. Outside the oven, normal rules apply.
+  // Between the machine and the pastry case, 80 units apart: the oven info area
+  // overlaps part of this gap, so the oven wins there. Outside the oven, normal rules apply.
   assert.equal(hitTest(machine.x + machine.w + 10, 200)?.id, 'oven');
   assert.equal(hitTest(machine.x + machine.w + 20, 200)?.id, 'oven');
-  // Below the oven area (y > 270), the machine/case near-miss still works.
+  // Below the oven area (y > 270), near-miss still selects the closest station.
+  const cas = HIT_AREAS.find((a) => a.id === 'case');
   assert.equal(hitTest(machine.x + machine.w + 10, 300)?.id, 'machine');
-  assert.equal(hitTest(machine.x + machine.w + 20, 300)?.id, 'case');
+  assert.equal(hitTest(cas.x - 10, 300)?.id, 'case');
   // Open floor and the wall belong to nothing.
   assert.equal(hitTest(480, 60), null);
   assert.equal(hitTest(120, 470), null);
