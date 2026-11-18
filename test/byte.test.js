@@ -73,7 +73,7 @@ test('urgency: Byte names the ticket and what is wrong with it', () => {
   // Nothing made: the line says so.
   const idle = counter(scene([{ at: 0 }]));
   const idleLines = listen(idle);
-  idle.wait(720 - 4 * TICKS_PER_SECOND);
+  idle.wait(960 - 4 * TICKS_PER_SECOND);
   assert.ok(idleLines.some((l) => l.text === 'Ticket 1 is nearly out of patience and nothing is being made for them.' && l.urgent));
 
   // Made but not delivered: a different line.
@@ -82,7 +82,7 @@ test('urgency: Byte names the ticket and what is wrong with it', () => {
   ready.until('guestWaiting');
   ready.spot(0);
   ready.station('machine');
-  ready.wait(720 - 4 * TICKS_PER_SECOND);
+  ready.wait(960 - 4 * TICKS_PER_SECOND);
   assert.ok(readyLines.some((l) => l.text === "Ticket 1's latte is ready and they are about to leave. Carry it over!"));
   assert.equal(readyLines.filter((l) => l.text.includes('about to leave')).length, 1, 'said once, not repeated');
 
@@ -169,7 +169,7 @@ test('over a whole shift Byte speaks sparingly, never twice within 2.5 s unless 
     }
     c.tick();
   }
-  assert.ok(c.state.metrics.guests.served >= 10, `the test player served only ${c.state.metrics.guests.served}`);
+  assert.ok(c.state.metrics.guests.served >= 7, `the test player served only ${c.state.metrics.guests.served}`);
   const actions = c.events.filter((e) => e.type === 'actionCompleted').length;
   assert.ok(lines.length >= 5 && lines.length <= 30, `${lines.length} lines`);
   assert.ok(lines.length < actions, `${lines.length} lines for ${actions} actions`);

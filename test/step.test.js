@@ -30,7 +30,7 @@ test('a guest arrives on their tick, claims a spot, and waits after walking in',
   assert.equal(d.state.guests[0].state, 'walkingIn');
   assert.equal(d.until('guestWaiting').tick, 35);
   // Patience has been running since arrival.
-  assert.equal(d.state.guests[0].patienceLeft, 720 - 30);
+  assert.equal(d.state.guests[0].patienceLeft, 960 - 30);
 });
 
 test('start-brew reserves a dish, then the machine brews unattended', () => {
@@ -140,7 +140,7 @@ test('an asking guest who is ignored leaves unhappy, and their dish goes to the 
 test('a waiting guest who is ignored leaves when their patience runs out', () => {
   const d = drive(scene([{ at: 0 }]));
   const left = d.until('guestLeftUnhappy');
-  assert.equal(left.tick, 720);
+  assert.equal(left.tick, 960);
   assert.equal(left.wasAsking, false);
   assert.deepEqual(d.state.spots, [null, null, null]);
   assert.equal(d.state.dishes.every((dish) => dish.holder.kind === 'rack'), true);
@@ -310,12 +310,12 @@ test('a queued action can be removed before it starts', () => {
 });
 
 test('a queued action whose guest has gone is dropped, and the prepared item waits for the next guest', () => {
-  const state = scene([{ at: 0 }, { at: 760 }]);
+  const state = scene([{ at: 0 }, { at: 1000 }]);
   state.tables[2].state = 'dirty';
   const d = drive(state);
   d.tap(AT.machine);
-  d.to(680);
-  d.tap(table(3)); // a long job
+  d.to(910); // advance to near the end of guest 1's patience (960 ticks)
+  d.tap(table(3)); // a long job: wipe (~54 ticks) finishes after guest 1 leaves
   d.tap(spot(0)); // queued behind it
   assert.equal(d.state.owner.queue[0].kind, 'handOver');
   assert.equal(d.until('guestLeftUnhappy').guestId, 1);
@@ -365,10 +365,10 @@ test('doors close at the shift length, every guest gets an outcome, and the end 
   assert.equal(d.until('doorsClosed').tick, state.timing.shiftLength - 1);
   assert.equal(d.state.phase, 'closing');
 
-  d.to(2919);
+  d.to(3159);
   d.tap(table(3)); // an action still in progress when the shift ends
   const ended = d.until('shiftEnded');
-  assert.equal(ended.tick, 2200 + 720);
+  assert.equal(ended.tick, 2200 + 960);
   const sameTick = d.events.filter((e) => e.tick === ended.tick).map((e) => e.type);
   assert.deepEqual(sameTick, ['guestLeftUnhappy', 'actionCancelled', 'guestLeftHappy', 'shiftEnded']);
   assert.equal(d.events.find((e) => e.type === 'actionCancelled')?.reason, 'shiftEnded');

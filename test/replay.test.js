@@ -14,7 +14,7 @@ import { createPlayer } from './support/players.js';
  * changes; update them only on purpose. Matching values on another machine
  * show the simulation is deterministic across platforms.
  */
-const PINNED = { events: '9cfb29e6c3762031', state: '36c2a46fb52cbe76' };
+const PINNED = { events: 'fc3afe72c5c5040b', state: '5a0e67279f655e0e' };
 
 test('a full shift is reproducible and pinned', () => {
   const a = runShift({}, createPlayer('priority'));
