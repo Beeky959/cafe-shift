@@ -7,6 +7,7 @@ import { createGame } from './game.js';
 import { createUi, element } from './ui/dom.js';
 import { createRenderer } from './view/renderer.js';
 import { areaForKey, hitTest } from './view/scene.js';
+import { createStationOverlay } from './view/station-overlay.js';
 
 /**
  * Optional development settings from the address bar:
@@ -28,6 +29,13 @@ function start() {
   const canvas = element('scene', HTMLCanvasElement);
   const renderer = createRenderer(canvas);
 
+  const stationPanel = document.getElementById('station-panel');
+  const stationCanvas = document.getElementById('station-canvas');
+  const stationClose = document.getElementById('station-close');
+  const overlay = (stationPanel instanceof HTMLElement && stationCanvas instanceof HTMLCanvasElement)
+    ? createStationOverlay(stationPanel, stationCanvas)
+    : null;
+
   /** @type {ReturnType<typeof createGame>} */
   // eslint-disable-next-line prefer-const
   let game;
@@ -39,7 +47,7 @@ function start() {
     onOverlayItem: (index) => game.overlayItem(index),
   });
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-  game = createGame({ seed: options.seed, ui, draw: renderer.draw, reducedMotion });
+  game = createGame({ seed: options.seed, ui, draw: renderer.draw, reducedMotion, overlay });
 
   renderer.resize();
   new ResizeObserver(() => renderer.resize()).observe(canvas);
@@ -109,6 +117,27 @@ function start() {
       game.press(area);
     }
   });
+
+  // Station overlay pointer events — routed to the overlay when open.
+  if (stationCanvas instanceof HTMLCanvasElement && overlay) {
+    stationCanvas.addEventListener('pointerdown', (event) => {
+      if (!event.isPrimary) return;
+      event.preventDefault();
+      overlay.onPointerDown(event.clientX, event.clientY);
+    });
+    stationCanvas.addEventListener('pointermove', (event) => {
+      if (!event.isPrimary) return;
+      overlay.onPointerMove(event.clientX, event.clientY);
+    });
+    stationCanvas.addEventListener('pointerup', (event) => {
+      if (!event.isPrimary) return;
+      overlay.onPointerUp();
+    });
+    stationCanvas.addEventListener('pointercancel', () => overlay.onPointerUp());
+  }
+  if (stationClose instanceof HTMLElement) {
+    stationClose.addEventListener('click', () => game.dismissOverlay());
+  }
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) game.pauseIfPlaying();

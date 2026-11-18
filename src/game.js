@@ -106,8 +106,9 @@ function saveProgress(wallet, purchased, completedMissions) {
  * @param {GameUi} deps.ui
  * @param {(state: SimState, view: ViewState) => void} deps.draw
  * @param {boolean} [deps.reducedMotion] The player asked their device for less motion.
+ * @param {{ isOpen(): boolean, open(t: string, s: SimState): void, close(): void, onFrame(dt: number, s: SimState, ev: readonly import('./sim/types.js').SimEvent[]): void } | null} [deps.overlay]
  */
-export function createGame({ seed, ui, draw, reducedMotion = false }) {
+export function createGame({ seed, ui, draw, reducedMotion = false, overlay = null }) {
   // Load saved progress or start fresh
   const saved = loadProgress();
   /** Coins that carry over between shifts. */
@@ -344,7 +345,28 @@ export function createGame({ seed, ui, draw, reducedMotion = false }) {
         case 'tapRejected':
           notice(rejectionText(String(e.reason)));
           break;
+        case 'actionStarted':
+          if (overlay) {
+            const kind = String(e.kind);
+            if (kind === 'wash') overlay.open('sink', state);
+            else if (kind === 'bakeLoad' || kind === 'bakeUnload') overlay.open('oven', state);
+            else if (kind === 'handOver') overlay.open('handoff', state);
+          }
+          break;
+        case 'actionCompleted':
+          if (overlay?.isOpen()) overlay.close();
+          break;
+        case 'dishWashed':
+          if (overlay?.isOpen()) overlay.close();
+          break;
+        case 'guestUsingStand':
+          if (overlay && state.stand.installed) overlay.open('tapit', state);
+          break;
+        case 'standAnswered':
+          if (overlay?.isOpen()) overlay.close();
+          break;
         case 'itemHandedOver':
+          if (overlay?.isOpen()) overlay.close();
           // The completed transaction: the ticket is stamped.
           if (was && was.spot !== null) ui.receipt(was.spot, `Paid +${e.coins}`, view.now + 1500);
           break;
@@ -418,6 +440,7 @@ export function createGame({ seed, ui, draw, reducedMotion = false }) {
       }
     }
     view.anim.sync(state, visual);
+    overlay?.onFrame(visual, state, []);
     ui.update(state, service, now);
     const t0 = performance.now();
     draw(state, view);
@@ -677,6 +700,11 @@ export function createGame({ seed, ui, draw, reducedMotion = false }) {
       const unlocked = index === 0 || completedMissions.has(index - 1);
       if (!unlocked) return;
       start(index);
+    },
+
+    /** Dismiss the station close-up panel (overlay close button). */
+    dismissOverlay() {
+      if (overlay?.isOpen()) overlay.close();
     },
 
     /** @param {string | null} id */
