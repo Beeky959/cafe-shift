@@ -1,0 +1,1238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Café Shift — Hero Coffee</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:#1e1208;
+    display:flex;align-items:center;justify-content:center;
+    min-height:100vh;overflow:hidden;
+    touch-action:none;user-select:none;
+    font-family:'Segoe UI',system-ui,sans-serif;
+  }
+  #wrap{position:relative;width:100%;max-width:480px}
+  canvas{display:block;width:100%;height:auto;touch-action:none}
+  #end{
+    display:none;position:absolute;inset:0;
+    background:rgba(18,8,2,0.94);
+    color:#f5e6c8;
+    flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;padding:28px;text-align:center;
+    border-radius:16px;
+  }
+  #end.show{display:flex}
+  #end h2{font-size:26px;color:#d4902a;letter-spacing:.04em}
+  #end .rows{width:100%;max-width:360px}
+  #end .row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #3a2818;font-size:14px}
+  #end .row strong{color:#d4902a}
+  #end .note{max-width:360px;background:#2a1a08;border-radius:10px;padding:14px;font-size:13px;line-height:1.65;text-align:left;color:#e8d8c0}
+  #end button{padding:12px 36px;background:#d4902a;color:#1e1208;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;text-transform:uppercase;letter-spacing:.06em;margin-top:4px}
+  #end button:hover{background:#e8a840}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c" width="480" height="610"></canvas>
+  <div id="end">
+    <h2 id="et">Shift Over</h2>
+    <div class="rows" id="er"></div>
+    <div class="note" id="en"></div>
+    <button onclick="startGame()">Try Again</button>
+  </div>
+</div>
+<script>
+'use strict';
+// ═══════════════════════════════════════════════════════════════════════════
+//  CONFIG
+// ═══════════════════════════════════════════════════════════════════════════
+const W=480, H=610, SHIFT_S=45;
+
+// Gauge zones (fraction 0–1)
+const EX = { wkEnd:.26, okLoEnd:.38, pfEnd:.62, okHiEnd:.74 };
+const ML = { thinEnd:.38, okLoEnd:.52, pfEnd:.72, fullEnd:.88 };
+const NEEDLE_SPD = 0.195;  // fraction/sec during pull
+const MILK_SPD   = 0.20;
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  PALETTE
+// ═══════════════════════════════════════════════════════════════════════════
+const P = {
+  wall0:'#faf3ea', wall1:'#edd9c8',
+  tile:'rgba(190,160,130,0.13)',
+  ctr:'#c8a06a', ctrFront:'#9a7040', ctrHi:'#deb87a',
+  mb:'#eee8e0',  mbHi:'#fff9f2',  mbSh:'rgba(80,50,20,0.18)',
+  mPanel:'#ddd3c5', mDark:'#3c2a1a', mTrim:'#b89870',
+  mSilv:'#ccc5bb', mSilvHi:'#e8e2d8', mSilvSh:'#8a8078',
+  ledG:'#60d060', ledR:'#e06040', ledA:'#f0a040',
+  btnT:'#c05028', btnTHi:'#e07040',   // terracotta shot buttons
+  gaugeWk:'#4a7cb0', gaugeOk:'#c8982a', gaugePf:'#4a9e58', gaugeBt:'#b83030',
+  needleTk:'#ffffff',
+  pullOff:'#5a3820', pullOn:'#c86028', pullHold:'#e88040',
+  pullTxt:'#fff4e8',
+  cup:'#fff8f2', cupEdge:'#dcc8b0', saucer:'#f4ece0',
+  espD:'#1a0800', espM:'#4a1800', espPour:'#7a3010',
+  crema:'#c07820', cremaHi:'#e89030',
+  milkW:'#fff8ee', milkCrm:'#f8edd0',
+  latteArt:'#8a4418',
+  steam0:'rgba(250,244,236,',
+  txtD:'#3a2818', txtM:'#9a7858', txtF:'#c8a880',
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  EASING
+// ═══════════════════════════════════════════════════════════════════════════
+const ease = {
+  out:  t=>1-(1-t)**2,
+  out3: t=>1-(1-t)**3,
+  io:   t=>t<.5?2*t*t:1-((-2*t+2)**2)/2,
+  back: (t,s=1.6)=>{ const c3=s+1; return c3*t**3-s*t**2; },
+  eBack:(t,s=1.6)=>{ const c3=s+1; return 1+c3*(t-1)**3+s*(t-1)**2; },
+  bounce:t=>{
+    if(t<1/2.75)return 7.5625*t*t;
+    if(t<2/2.75)return 7.5625*(t-=1.5/2.75)*t+.75;
+    if(t<2.5/2.75)return 7.5625*(t-=2.25/2.75)*t+.9375;
+    return 7.5625*(t-=2.625/2.75)*t+.984375;
+  },
+};
+const cl=(v,lo,hi)=>Math.min(Math.max(v,lo),hi);
+const lerp=(a,b,t)=>a+(b-a)*t;
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════════════════════
+const PHASE = { IDLE:'idle',CUP_IN:'cup_in',READY:'ready',
+  PULLING:'pulling',PULL_DONE:'pull_done',
+  MILK_IN:'milk_in',POURING:'pouring',MILK_DONE:'milk_done',
+  RESULT:'result',SERVE_OUT:'serve_out',NEXT:'next',DONE:'done' };
+
+const ORDERS = ['espresso','latte','mocha'];
+const ORDER_DISPLAY = { espresso:'Espresso', latte:'Latte', mocha:'Mocha' };
+const ORDER_COLOR = { espresso:'#d4902a', latte:'#78b0d8', mocha:'#c06888' };
+const EMOJIS = ['👩','👨','🧑','👩‍💼','👨‍💼','🧔','👩‍🦱','🧒'];
+
+let S; // global state
+
+function mkSteam(){
+  return { x:0,y:0, vx:(Math.random()-.5)*8, vy:-20-Math.random()*15,
+    r:3+Math.random()*5, life:1, maxLife:0.8+Math.random()*0.6, alpha:0 };
+}
+
+function freshState(){
+  return {
+    phase:PHASE.IDLE, phaseT:0,
+    orderType:'latte',
+    timeLeft:SHIFT_S, lastTs:null,
+
+    // Extraction
+    needle:0, pulling:false,
+    grade:null, gradeT:0,
+
+    // Milk
+    milkNeedle:0, milkPulling:false,
+    milkGrade:null,
+
+    // Cup animation
+    cupY:0,            // 0=in position, 1=off screen below
+    cupFill:0,         // coffee level 0-1
+    cupCrema:0,        // crema layer 0-1
+    cupMilk:0,         // milk level 0-1
+    latteArtT:0,       // 0-1 reveal
+
+    // Pitcher
+    pitcherX:1,        // 0=in, 1=off right
+
+    // Stream animation
+    streamAlpha:0,
+    milkStreamAlpha:0,
+
+    // Flash feedback
+    flashAlpha:0, flashColor:'#ffffff', flashTxt:'',
+
+    // Steam particles
+    steam:[], steamTimer:0,
+
+    // Machine
+    machineShake:0,
+    gaugePressure:0,   // 0-1 pressure gauge needle
+    ledPulse:0,
+
+    // Score
+    score:0, served:0,
+    stats:{ perfect:0,ok:0,bad:0,missed:0 },
+
+    // Current customer
+    customer:null, queue:[],
+  };
+}
+
+function gradeExtraction(n){
+  if(n>=EX.pfEnd&&n<=EX.okHiEnd) return n>=EX.wkEnd&&n<=EX.pfEnd? 'ok':'ok'; // catch-all
+  if(n>=EX.wkEnd&&n<EX.okLoEnd) return 'ok';
+  if(n>=EX.okLoEnd&&n<=EX.okHiEnd) return n>=EX.pfEnd?'ok':'ok';
+  if(n>=EX.okLoEnd&&n<EX.pfEnd) return 'ok';
+  if(n>=EX.pfEnd&&n<=EX.okHiEnd) return 'perfect'; // actually recalc properly:
+  // Zones: 0-wkEnd=weak, wkEnd-okLoEnd=ok, okLoEnd-pfEnd=perfect*, pfEnd-okHiEnd=ok, okHiEnd+=bitter
+  return 'bad';
+}
+function gradeEx(n){
+  if(n<EX.wkEnd) return 'weak';
+  if(n<EX.okLoEnd) return 'ok';
+  if(n<=EX.pfEnd) return 'perfect';
+  if(n<=EX.okHiEnd) return 'ok';
+  return 'bitter';
+}
+function gradeMilk(n){
+  if(n<ML.thinEnd) return 'thin';
+  if(n<ML.okLoEnd) return 'ok';
+  if(n<=ML.pfEnd) return 'perfect';
+  if(n<=ML.fullEnd) return 'ok';
+  return 'too_much';
+}
+
+function spawnCustomer(){
+  const patience=11+Math.random()*7;
+  return { emoji:EMOJIS[Math.floor(Math.random()*EMOJIS.length)],
+    order:ORDERS[Math.floor(Math.random()*ORDERS.length)],
+    patienceMax:patience, patienceLeft:patience };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CANVAS SETUP
+// ═══════════════════════════════════════════════════════════════════════════
+const cv=document.getElementById('c');
+const cx=cv.getContext('2d');
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DRAWING HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+function roundRect(x,y,w,h,r,fill,stroke,sw){
+  cx.beginPath();
+  cx.moveTo(x+r,y);
+  cx.lineTo(x+w-r,y);
+  cx.quadraticCurveTo(x+w,y,x+w,y+r);
+  cx.lineTo(x+w,y+h-r);
+  cx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  cx.lineTo(x+r,y+h);
+  cx.quadraticCurveTo(x,y+h,x,y+h-r);
+  cx.lineTo(x,y+r);
+  cx.quadraticCurveTo(x,y,x+r,y);
+  cx.closePath();
+  if(fill){cx.fillStyle=fill;cx.fill();}
+  if(stroke){cx.strokeStyle=stroke;cx.lineWidth=sw||2;cx.stroke();}
+}
+
+function circle(x,y,r,fill,stroke,sw){
+  cx.beginPath();cx.arc(x,y,r,0,Math.PI*2);
+  if(fill){cx.fillStyle=fill;cx.fill();}
+  if(stroke){cx.strokeStyle=stroke;cx.lineWidth=sw||2;cx.stroke();}
+}
+
+function grd(x0,y0,x1,y1,stops){
+  const g=cx.createLinearGradient(x0,y0,x1,y1);
+  stops.forEach(([t,c])=>g.addColorStop(t,c));
+  return g;
+}
+function rgrd(x,y,r0,r1,stops){
+  const g=cx.createRadialGradient(x,y,r0,x,y,r1);
+  stops.forEach(([t,c])=>g.addColorStop(t,c));
+  return g;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DRAW: BACKGROUND
+// ═══════════════════════════════════════════════════════════════════════════
+function drawBg(){
+  // Wall gradient
+  cx.fillStyle=grd(0,0,0,295,[[0,P.wall0],[1,P.wall1]]);
+  cx.fillRect(0,0,W,295);
+
+  // Subtle tile grid
+  cx.strokeStyle=P.tile; cx.lineWidth=1;
+  for(let y=60;y<295;y+=56){ cx.beginPath();cx.moveTo(0,y);cx.lineTo(W,y);cx.stroke(); }
+  for(let x=56;x<W;x+=64){ cx.beginPath();cx.moveTo(x,60);cx.lineTo(x,295);cx.stroke(); }
+
+  // Counter
+  cx.fillStyle=grd(0,278,0,320,[[0,P.ctrHi],[0.3,P.ctr],[1,P.ctrFront]]);
+  cx.fillRect(0,278,W,42);
+  // Counter highlight line
+  cx.fillStyle='rgba(255,245,220,0.5)';cx.fillRect(0,278,W,3);
+  // Counter front edge shadow
+  cx.fillStyle='rgba(50,20,0,0.25)';cx.fillRect(0,316,W,4);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DRAW: ESPRESSO MACHINE
+// ═══════════════════════════════════════════════════════════════════════════
+function drawMachine(s){
+  const mx=240, shake=Math.sin(s.phaseT*80)*s.machineShake*2;
+  cx.save(); cx.translate(shake,0);
+
+  // ── Drop shadow
+  cx.shadowColor='rgba(60,30,0,0.35)'; cx.shadowBlur=20; cx.shadowOffsetY=10;
+  roundRect(72,62,336,208,24,P.mb,null,0);
+  cx.shadowColor='transparent'; cx.shadowBlur=0; cx.shadowOffsetY=0;
+
+  // ── Main body
+  const bodyGrd=grd(72,62,408,270,[[0,P.mbHi],[0.5,P.mb],[1,'#d8d0c4']]);
+  roundRect(72,62,336,208,24,bodyGrd,P.mTrim,2);
+
+  // ── Top surface highlight (subtle)
+  cx.fillStyle='rgba(255,250,240,0.6)';
+  roundRect(76,66,328,32,16,cx.fillStyle,null,0);
+
+  // ── Front panel (inset, slightly darker)
+  const panelGrd=grd(80,100,400,260,[[0,P.mPanel],[1,'#ccc4b4']]);
+  roundRect(80,100,160,154,10,panelGrd,P.mTrim,1.5);
+
+  // ── PRESSURE GAUGE (the centrepiece, left panel)
+  drawGaugeDeco(160+10,180);
+
+  // ── RIGHT PANEL: shot buttons, LED
+  drawControlPanel(310, 100, 90, 160);
+
+  // ── Top display strip (dark glass)
+  roundRect(84,66,312,34,10,grd(84,66,84,100,[[0,'#2a1a0a'],[1,'#1a0e06']]),null,0);
+  // Display text
+  cx.fillStyle='rgba(220,170,100,0.7)'; cx.font='bold 11px system-ui';
+  cx.textAlign='center'; cx.textBaseline='middle';
+  cx.fillText('GOOD BEANS  ✦  CAFÉ SHIFT', 240, 83);
+
+  // ── GROUP HEAD (bottom center protrusion)
+  drawGroupHead(s);
+
+  // ── STEAM WAND (right side)
+  drawSteamWand();
+
+  cx.restore();
+}
+
+function drawGaugeDeco(cx_,cy_){
+  const r=38;
+  // Outer ring: brushed silver
+  const silverGrd=rgrd(cx_,cy_,0,r+4,[[0,P.mSilvHi],[0.6,P.mSilv],[1,P.mSilvSh]]);
+  circle(cx_,cy_,r+4,silverGrd,null,0);
+  // Face
+  circle(cx_,cy_,r,grd(cx_-r,cy_-r,cx_+r,cy_+r,[[0,'#fff8f0'],[1,'#f0e8d8']]),P.mTrim,1);
+  // Tick marks
+  cx.strokeStyle=P.mDark; cx.lineWidth=1.5;
+  for(let i=0;i<=10;i++){
+    const a=-Math.PI*0.75+i*(Math.PI*1.5/10);
+    const r0=i%5===0?r-10:r-7;
+    cx.beginPath();
+    cx.moveTo(cx_+Math.cos(a)*r0, cy_+Math.sin(a)*r0);
+    cx.lineTo(cx_+Math.cos(a)*(r-2), cy_+Math.sin(a)*(r-2));
+    cx.stroke();
+  }
+  // Green zone arc (8-10 bar = 70-100% of range = good extraction pressure)
+  cx.strokeStyle='rgba(60,160,80,0.5)'; cx.lineWidth=5; cx.lineCap='round';
+  cx.beginPath();
+  cx.arc(cx_,cy_,r-8,-Math.PI*0.75+7*(Math.PI*1.5/10), -Math.PI*0.75+10*(Math.PI*1.5/10));
+  cx.stroke();
+  // Needle (animated via S.gaugePressure)
+  const p=S?S.gaugePressure:0;
+  const na=-Math.PI*0.75+p*(Math.PI*1.5);
+  cx.save();
+  cx.strokeStyle='#c03020'; cx.lineWidth=2; cx.lineCap='round';
+  cx.shadowColor='rgba(0,0,0,0.3)'; cx.shadowBlur=3;
+  cx.beginPath();
+  cx.moveTo(cx_-Math.cos(na)*6, cy_-Math.sin(na)*6);
+  cx.lineTo(cx_+Math.cos(na)*(r-12), cy_+Math.sin(na)*(r-12));
+  cx.stroke();
+  cx.restore();
+  // Center screw
+  circle(cx_,cy_,4,P.mSilv,P.mSilvSh,1);
+  // "BAR" label
+  cx.fillStyle=P.txtM; cx.font='9px system-ui'; cx.textAlign='center'; cx.textBaseline='middle';
+  cx.fillText('BAR',cx_,cy_+16);
+}
+
+function drawControlPanel(px,py,pw,ph){
+  // Right side of machine — shot buttons and LED
+  // 1-shot button
+  const btn1y=py+42;
+  circle(px+pw/2,btn1y,18,
+    grd(px+pw/2-18,btn1y-18,px+pw/2+18,btn1y+18,[[0,P.btnTHi],[1,P.btnT]]),
+    P.mDark,1.5);
+  cx.fillStyle=P.pullTxt; cx.font='bold 9px system-ui';
+  cx.textAlign='center'; cx.textBaseline='middle';
+  cx.fillText('1×', px+pw/2, btn1y);
+
+  // 2-shot button
+  const btn2y=py+86;
+  circle(px+pw/2,btn2y,18,
+    grd(px+pw/2-18,btn2y-18,px+pw/2+18,btn2y+18,[[0,P.btnTHi],[1,P.btnT]]),
+    P.mDark,1.5);
+  cx.fillStyle=P.pullTxt; cx.font='bold 9px system-ui';
+  cx.textAlign='center'; cx.textBaseline='middle';
+  cx.fillText('2×', px+pw/2, btn2y);
+
+  // Status LED
+  const ledColor=S? (S.phase===PHASE.PULLING?P.ledA:
+    (S.phase===PHASE.READY||S.phase===PHASE.PULL_DONE||S.phase===PHASE.MILK_IN)?P.ledG:
+    (S.phase===PHASE.RESULT&&S.grade==='weak')?P.ledR:P.ledG) : P.ledG;
+  const pulse=S?0.7+Math.sin(S.phaseT*4)*0.3:1;
+  circle(px+pw/2,py+120,6,ledColor,'rgba(0,0,0,0.3)',1);
+  cx.save();cx.globalAlpha=pulse*0.5;
+  circle(px+pw/2,py+120,10,ledColor,null,0);
+  cx.restore();
+
+  // Brand text
+  cx.fillStyle='rgba(80,55,30,0.5)'; cx.font='bold 10px system-ui';
+  cx.textAlign='center'; cx.textBaseline='middle';
+  cx.fillText('PAVONA', px+pw/2, py+150);
+}
+
+function drawGroupHead(s){
+  const ghx=240, ghy=258;
+  // Chrome disc (group head)
+  const chrGrd=rgrd(ghx,ghy,0,45,[[0,P.mSilvHi],[0.5,P.mSilv],[1,P.mSilvSh]]);
+  circle(ghx,ghy,42,chrGrd,P.mSilvSh,2);
+  circle(ghx,ghy,34,'rgba(50,30,10,0.15)',null,0);
+  // Portafilter
+  roundRect(ghx-38,ghy+8,76,22,8,grd(ghx-38,ghy+8,ghx+38,ghy+30,[[0,'#5a4030'],[1,P.mDark]]),P.mDark,1.5);
+  // Handle
+  cx.save();cx.translate(ghx+36,ghy+18);cx.rotate(0.3);
+  roundRect(-6,-5,52,10,5,grd(-6,0,46,0,[[0,'#5a4030'],[1,P.mDark]]),P.mDark,1.5);
+  cx.restore();
+  // Spout holes
+  circle(ghx-20,ghy+34,4,'rgba(20,8,0,0.9)',P.mDark,1);
+  circle(ghx+20,ghy+34,4,'rgba(20,8,0,0.9)',P.mDark,1);
+}
+
+function drawSteamWand(){
+  // Right steam wand
+  cx.save();
+  cx.strokeStyle=P.mSilv; cx.lineWidth=8; cx.lineCap='round';
+  cx.beginPath();cx.moveTo(392,105);cx.bezierCurveTo(410,110,415,160,408,205);cx.stroke();
+  cx.strokeStyle=P.mSilvHi; cx.lineWidth=4;
+  cx.beginPath();cx.moveTo(392,105);cx.bezierCurveTo(410,110,415,160,408,205);cx.stroke();
+  // Nozzle tip
+  circle(408,207,7,P.mSilv,P.mSilvSh,2);
+  circle(408,207,3,P.mDark,null,0);
+  cx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DRAW: CUP
+// ═══════════════════════════════════════════════════════════════════════════
+function drawCup(s){
+  const isLatte=s.orderType!=='espresso';
+  const cw=isLatte?62:52, ch=isLatte?60:46;
+  const cx_=240;
+  const baseY=320; // counter surface
+  const offY=s.cupY*(80); // 0=in position
+  const cy_=baseY-ch+offY;
+
+  if(s.cupY>0.98) return; // fully off screen
+
+  cx.save();
+
+  // Saucer
+  cx.fillStyle=grd(cx_-50,cy_+ch,cx_+50,cy_+ch+10,[[0,P.saucer],[1,'#e0d0bc']]);
+  cx.beginPath();
+  cx.ellipse(cx_,cy_+ch+5, 48,10,0,0,Math.PI*2);
+  cx.fill();
+  cx.strokeStyle='rgba(180,150,110,0.6)';cx.lineWidth=1;cx.stroke();
+
+  // Cup shadow inside (depth)
+  cx.fillStyle=grd(cx_-cw/2,cy_,cx_+cw/2,cy_+ch,
+    [[0,'rgba(30,10,0,0.08)'],[1,'rgba(30,10,0,0.0)']]);
+  roundRect(cx_-cw/2+3,cy_+3,cw-6,ch-6,8,cx.fillStyle,null,0);
+
+  // Coffee fill
+  if(s.cupFill>0){
+    const fillH=Math.min(s.cupFill*(ch-8),ch-8);
+    const coffeeY=cy_+ch-4-fillH;
+    // Coffee gradient: dark at bottom, pour-color at top
+    cx.fillStyle=grd(cx_-cw/2+3,coffeeY,cx_+cw/2-3,cy_+ch-4,
+      [[0,P.espD],[0.6,P.espM],[1,P.espPour]]);
+    cx.save();
+    cx.beginPath();
+    cx.rect(cx_-cw/2+3,cy_+3,cw-6,ch-6);
+    cx.clip();
+    roundRect(cx_-cw/2+3,coffeeY,cw-6,fillH+1,4,cx.fillStyle,null,0);
+    cx.restore();
+  }
+
+  // Crema layer
+  if(s.cupCrema>0&&s.cupFill>0.1){
+    const cremaH=Math.min(s.cupCrema*10, 10);
+    const fillH=s.cupFill*(ch-8);
+    const coffeeY=cy_+ch-4-fillH;
+    cx.save();
+    cx.beginPath(); cx.rect(cx_-cw/2+3,cy_+3,cw-6,ch-6); cx.clip();
+    // Crema base
+    cx.fillStyle=P.crema;
+    roundRect(cx_-cw/2+3,coffeeY-cremaH,cw-6,cremaH+2,3,P.crema,null,0);
+    // Crema bubbles
+    cx.fillStyle=P.cremaHi;
+    for(let i=0;i<8;i++){
+      const bx=cx_-cw/2+8+Math.sin(i*1.9)*18+Math.cos(i*2.7)*10;
+      const by=coffeeY-cremaH/2+Math.sin(i*3.1)*3;
+      circle(bx,by, 1.5+Math.sin(i)*0.8, P.cremaHi,null,0);
+    }
+    cx.restore();
+  }
+
+  // Milk layer (for latte/mocha)
+  if(s.cupMilk>0){
+    const milkH=Math.min(s.cupMilk*(ch-8), ch-12);
+    const fillTop=cy_+ch-4-(s.cupFill*(ch-8));
+    const milkY=fillTop-milkH;
+    cx.save();
+    cx.beginPath(); cx.rect(cx_-cw/2+3,cy_+3,cw-6,ch-6); cx.clip();
+    cx.fillStyle=grd(cx_-cw/2+3,milkY,cx_+cw/2-3,milkY+milkH,
+      [[0,P.milkW],[1,P.milkCrm]]);
+    roundRect(cx_-cw/2+3,milkY,cw-6,milkH+2,3,cx.fillStyle,null,0);
+    cx.restore();
+  }
+
+  // Latte art
+  if(s.latteArtT>0&&s.cupMilk>0.5){
+    drawLatteArt(cx_,cy_,cw,ch,s.latteArtT);
+  }
+
+  // Cup body (white ceramic)
+  const cupGrd=grd(cx_-cw/2,cy_,cx_+cw/2,cy_+ch,
+    [[0,P.mbHi],[0.4,P.cup],[1,P.cupEdge]]);
+  roundRect(cx_-cw/2,cy_,cw,ch,10,null,cupGrd,2.5);
+
+  // Cup rim highlight
+  cx.strokeStyle='rgba(255,250,245,0.8)';cx.lineWidth=1.5;
+  cx.beginPath();
+  cx.moveTo(cx_-cw/2+10,cy_);
+  cx.lineTo(cx_+cw/2-10,cy_);
+  cx.stroke();
+
+  // Cup handle (right side)
+  cx.strokeStyle=P.cupEdge; cx.lineWidth=3; cx.lineCap='round';
+  cx.beginPath();
+  cx.moveTo(cx_+cw/2-2, cy_+ch*0.3);
+  cx.bezierCurveTo(cx_+cw/2+16,cy_+ch*0.3, cx_+cw/2+16,cy_+ch*0.7, cx_+cw/2-2,cy_+ch*0.7);
+  cx.stroke();
+  cx.strokeStyle='rgba(255,245,235,0.5)'; cx.lineWidth=1.5;
+  cx.beginPath();
+  cx.moveTo(cx_+cw/2-2, cy_+ch*0.3+1);
+  cx.bezierCurveTo(cx_+cw/2+13,cy_+ch*0.3+1, cx_+cw/2+13,cy_+ch*0.7-1, cx_+cw/2-2,cy_+ch*0.7-1);
+  cx.stroke();
+
+  cx.restore();
+}
+
+function drawLatteArt(cx_,cy_,cw,ch,t){
+  if(t<=0) return;
+  const surfY=cy_+ch-4-(S.cupFill*(ch-8))-(S.cupMilk*(ch-8))+4;
+  const aw=cw*0.55*t, surfaceR=aw*0.5;
+  cx.save();
+  cx.globalAlpha=Math.min(1,t*1.5);
+  // Clip to cup interior
+  cx.beginPath(); cx.rect(cx_-cw/2+4,cy_+4,cw-8,ch-8); cx.clip();
+  // Draw a simple heart in latte art style
+  cx.strokeStyle=P.latteArt; cx.lineWidth=2; cx.lineCap='round';
+  cx.fillStyle=P.latteArt;
+  // Two half-circles forming a heart
+  const hx=cx_, hy=surfY;
+  cx.save(); cx.scale(t,t); cx.translate(hx*(1-t), hy*(1-t));
+  cx.beginPath();
+  cx.arc(hx-surfaceR*0.4, hy, surfaceR*0.42, -Math.PI, 0);
+  cx.arc(hx+surfaceR*0.4, hy, surfaceR*0.42, -Math.PI, 0);
+  cx.lineTo(hx, hy+surfaceR*1.2);
+  cx.closePath();
+  cx.globalAlpha=0.6*Math.min(1,t*1.5);
+  cx.fill();
+  cx.restore();
+  cx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DRAW: COFFEE STREAM
+// ═══════════════════════════════════════════════════════════════════════════
+function drawStream(s){
+  if(s.streamAlpha<=0) return;
+  const isLatte=s.orderType!=='espresso';
+  const ch=isLatte?60:46;
+  const baseY=320, cy_=baseY-ch;
+  const spoutL=240-20, spoutR=240+20, spoutY=288;
+  const cupTop=cy_+8;
+  const alpha=s.streamAlpha;
+
+  // Stream color based on needle position (blond→golden→dark)
+  const n=s.needle;
+  const r=n<0.3?lerp(180,80,n/0.3):n<0.7?lerp(80,30,(n-0.3)/0.4):30;
+  const g=n<0.3?lerp(100,40,n/0.3):n<0.7?lerp(40,15,(n-0.3)/0.4):15;
+  const b=0;
+  const streamColor=`rgba(${Math.round(r)},${Math.round(g)},${b},${alpha})`;
+
+  cx.save();
+  cx.strokeStyle=streamColor;
+  cx.lineWidth=2+s.needle*2;
+  cx.lineCap='round';
+
+  // Left stream
+  cx.beginPath();
+  cx.moveTo(spoutL, spoutY);
+  cx.bezierCurveTo(spoutL-2, spoutY+10, 240-8+Math.sin(s.phaseT*12)*3, cupTop-10, 240-10, cupTop);
+  cx.stroke();
+
+  // Right stream
+  cx.beginPath();
+  cx.moveTo(spoutR, spoutY);
+  cx.bezierCurveTo(spoutR+2, spoutY+10, 240+8+Math.sin(s.phaseT*12+1)*3, cupTop-10, 240+10, cupTop);
+  cx.stroke();
+
+  cx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DRAW: STEAM PARTICLES
+// ═══════════════════════════════════════════════════════════════════════════
+function drawSteam(s){
+  for(const p of s.steam){
+    const a=p.alpha*0.7;
+    if(a<=0) continue;
+    cx.save();
+    cx.globalAlpha=a;
+    cx.fillStyle=P.steam0+a+')';
+    cx.shadowColor=P.steam0+'0.3)'; cx.shadowBlur=8;
+    cx.beginPath(); cx.arc(p.x,p.y,p.r,0,Math.PI*2); cx.fill();
+    cx.restore();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DRAW: MILK PITCHER
+// ═══════════════════════════════════════════════════════════════════════════
+function drawPitcher(s){
+  if(s.pitcherX>=1) return;
+  const px=320+s.pitcherX*160, py=240;
+  cx.save();
+
+  // Pitcher body
+  cx.fillStyle=grd(px-20,py,px+20,py+60,[[0,'#f8f4ee'],[1,'#e0d8cc']]);
+  cx.beginPath();
+  cx.moveTo(px-18,py+10);
+  cx.lineTo(px-22,py+60);
+  cx.lineTo(px+18,py+60);
+  cx.lineTo(px+15,py+10);
+  cx.closePath();
+  cx.fill();
+  cx.strokeStyle='#c8bfb0'; cx.lineWidth=1.5; cx.stroke();
+
+  // Pitcher neck/top
+  cx.fillStyle='#f8f4ee';
+  cx.beginPath();
+  cx.ellipse(px-1,py+10,18,6,0,0,Math.PI*2);
+  cx.fill(); cx.stroke();
+
+  // Pitcher spout (left side)
+  cx.fillStyle='#f0ece4';
+  cx.beginPath();
+  cx.moveTo(px-18,py+28);
+  cx.bezierCurveTo(px-30,py+22, px-38,py+30, px-32,py+38);
+  cx.lineTo(px-18,py+40);
+  cx.closePath(); cx.fill(); cx.stroke();
+
+  // Handle (right)
+  cx.strokeStyle='#c8bfb0'; cx.lineWidth=3.5; cx.lineCap='round';
+  cx.beginPath();
+  cx.moveTo(px+15,py+20);
+  cx.bezierCurveTo(px+32,py+20,px+32,py+50,px+15,py+50);
+  cx.stroke();
+
+  // Milk stream if pouring
+  if(s.milkStreamAlpha>0){
+    cx.strokeStyle=`rgba(255,248,235,${s.milkStreamAlpha})`;
+    cx.lineWidth=4; cx.lineCap='round';
+    const isLatte=s.orderType!=='espresso';
+    const ch=isLatte?60:46;
+    const baseY=320, cy_=baseY-ch;
+    cx.beginPath();
+    cx.moveTo(px-32,py+38);
+    cx.bezierCurveTo(px-40,py+70, 240+20,cy_+10, 240,cy_+8);
+    cx.stroke();
+    // Milk stream shimmer
+    cx.strokeStyle=`rgba(255,255,255,${s.milkStreamAlpha*0.5})`;
+    cx.lineWidth=2;
+    cx.beginPath();
+    cx.moveTo(px-32,py+38);
+    cx.bezierCurveTo(px-40,py+70, 240+22,cy_+10, 240+2,cy_+6);
+    cx.stroke();
+  }
+
+  cx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DRAW: EXTRACTION GAUGE (bottom)
+// ═══════════════════════════════════════════════════════════════════════════
+function drawGauge(s){
+  const gx=24, gy=345, gw=W-48, gh=24;
+  const isMilk=(s.phase===PHASE.POURING||s.phase===PHASE.MILK_IN);
+  const needle=isMilk?s.milkNeedle:s.needle;
+
+  // Track background
+  roundRect(gx,gy,gw,gh,gh/2,'rgba(30,15,5,0.4)',null,0);
+
+  // Zone fills
+  const zones=isMilk
+    ?[[ML.thinEnd,P.gaugeWk],[ML.okLoEnd,P.gaugeOk],[ML.pfEnd,P.gaugePf],[ML.fullEnd,P.gaugeOk],[1,P.gaugeBt]]
+    :[[EX.wkEnd,P.gaugeWk],[EX.okLoEnd,P.gaugeOk],[EX.pfEnd,P.gaugePf],[EX.okHiEnd,P.gaugeOk],[1,P.gaugeBt]];
+  let prev=0;
+  for(const [end,color] of zones){
+    cx.fillStyle=color+'aa';
+    cx.beginPath();
+    const lx=gx+prev*gw, lw=(end-prev)*gw;
+    cx.rect(lx, gy, lw, gh);
+    cx.fill();
+    prev=end;
+  }
+
+  // Perfect zone pulse glow
+  const pLo=isMilk?ML.okLoEnd:EX.okLoEnd;
+  const pHi=isMilk?ML.pfEnd:EX.pfEnd;
+  cx.save();
+  cx.globalAlpha=0.4+Math.sin(s.phaseT*5)*0.2;
+  cx.fillStyle=P.gaugePf+'55';
+  cx.fillRect(gx+pLo*gw, gy, (pHi-pLo)*gw, gh);
+  cx.restore();
+
+  // Track border
+  roundRect(gx,gy,gw,gh,gh/2,null,'rgba(255,230,180,0.3)',1.5);
+
+  // Zone labels
+  cx.fillStyle=P.txtF; cx.font='bold 9px system-ui'; cx.textBaseline='middle';
+  cx.textAlign='left';  cx.fillText(isMilk?'THIN':'WEAK',   gx+4,          gy+gh/2);
+  cx.textAlign='center';cx.fillText(isMilk?'PERFECT':'PERFECT', gx+pLo*gw+(pHi-pLo)*gw/2, gy-10);
+  cx.textAlign='right'; cx.fillText(isMilk?'TOO MUCH':'BITTER', gx+gw-4,   gy+gh/2);
+
+  // Needle
+  if(needle>0.01){
+    const nx=gx+needle*gw;
+    cx.save();
+    cx.shadowColor='rgba(255,255,255,0.8)'; cx.shadowBlur=8;
+    cx.fillStyle=P.needleTk;
+    cx.fillRect(nx-2, gy-4, 4, gh+8);
+    cx.restore();
+    // Needle cap
+    circle(nx,gy-4,5,'#ffffff','rgba(0,0,0,0.3)',1);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DRAW: PULL BUTTON
+// ═══════════════════════════════════════════════════════════════════════════
+let BTN = { x:240, y:457, r:70 };
+
+function drawPullBtn(s){
+  const isHolding=s.pulling||s.milkPulling;
+  const disabled=s.phase===PHASE.IDLE||s.phase===PHASE.CUP_IN||
+    s.phase===PHASE.PULL_DONE||s.phase===PHASE.RESULT||
+    s.phase===PHASE.SERVE_OUT||s.phase===PHASE.NEXT||s.phase===PHASE.DONE||
+    s.phase===PHASE.MILK_DONE;
+  const r=BTN.r*(isHolding?0.93:1);
+  const isMilk=s.phase===PHASE.POURING||s.phase===PHASE.MILK_IN;
+  const baseColor=disabled?P.pullOff:isMilk?'#4a90b8':P.pullOn;
+  const hiColor=disabled?'#8a6040':isMilk?'#70b0d8':P.pullHold;
+
+  // Outer glow when holding
+  if(isHolding&&!disabled){
+    cx.save();
+    cx.shadowColor=isMilk?'rgba(80,160,210,0.5)':'rgba(220,120,50,0.5)';
+    cx.shadowBlur=30;
+    circle(BTN.x,BTN.y,r+6,null,'transparent',0);
+    cx.restore();
+  }
+
+  // Shadow
+  cx.save();
+  cx.shadowColor='rgba(20,8,0,0.5)'; cx.shadowBlur=20; cx.shadowOffsetY=8;
+  circle(BTN.x,BTN.y,r,baseColor,null,0);
+  cx.restore();
+
+  // Main circle gradient
+  const btnGrd=rgrd(BTN.x-r*0.3,BTN.y-r*0.3,0,r,
+    [[0,hiColor],[0.5,baseColor],[1,isHolding?P.mDark:'rgba(30,15,0,0.6)']]);
+  circle(BTN.x,BTN.y,r,btnGrd,null,0);
+
+  // Top highlight arc
+  cx.save();
+  cx.strokeStyle='rgba(255,245,220,0.3)'; cx.lineWidth=4; cx.lineCap='round';
+  cx.beginPath();
+  cx.arc(BTN.x,BTN.y,r-8,-Math.PI*0.75,-Math.PI*0.25);
+  cx.stroke();
+  cx.restore();
+
+  // Button text
+  cx.fillStyle=disabled?'rgba(200,170,130,0.4)':P.pullTxt;
+  cx.font=`bold 16px system-ui`;
+  cx.textAlign='center'; cx.textBaseline='middle';
+  const line1=disabled?'—':isMilk?'POUR':'PULL';
+  const line2=disabled?'':isHolding?'release at the zone':'hold to '+line1.toLowerCase();
+  cx.fillText(line1, BTN.x, BTN.y-8);
+  cx.font='11px system-ui';
+  cx.fillStyle=disabled?'rgba(200,170,130,0.3)':'rgba(255,240,210,0.65)';
+  cx.fillText(isHolding?'release at the zone':isMilk?'hold to pour':'hold to pull', BTN.x, BTN.y+12);
+
+  // Icon
+  if(!disabled){
+    cx.font='22px system-ui';
+    cx.fillStyle=isHolding?'rgba(255,255,255,0.9)':'rgba(255,240,210,0.7)';
+    cx.fillText(isMilk?'🥛':'☕', BTN.x, BTN.y-34);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DRAW: HUD (top overlay)
+// ═══════════════════════════════════════════════════════════════════════════
+function drawHUD(s){
+  // Semi-transparent bar
+  cx.fillStyle='rgba(20,10,3,0.55)';
+  roundRect(0,0,W,46,0,cx.fillStyle,null,0);
+
+  // Timer
+  const m=Math.floor(s.timeLeft/60);
+  const sec=Math.floor(s.timeLeft%60);
+  cx.fillStyle=s.timeLeft<10?'#f06040':'#f5e0b0';
+  cx.font='bold 18px system-ui'; cx.textAlign='left'; cx.textBaseline='middle';
+  cx.fillText(`${m}:${String(sec).padStart(2,'0')}`, 20, 23);
+
+  // Order type
+  if(s.customer){
+    const col=ORDER_COLOR[s.customer.order]||'#d4902a';
+    cx.fillStyle=col;
+    cx.font='bold 15px system-ui'; cx.textAlign='center';
+    cx.fillText(`${s.customer.emoji}  ${ORDER_DISPLAY[s.customer.order].toUpperCase()}`, W/2, 23);
+    // Patience bar
+    const pct=s.customer.patienceLeft/s.customer.patienceMax;
+    const bw=100, bx=W/2-bw/2, by=38;
+    cx.fillStyle='rgba(255,200,100,0.15)';
+    roundRect(bx,by,bw,5,2.5,cx.fillStyle,null,0);
+    const pColor=pct>0.5?'#60c060':pct>0.25?'#e0a030':'#e04040';
+    cx.fillStyle=pColor;
+    roundRect(bx,by,bw*pct,5,2.5,pColor,null,0);
+  }
+
+  // Score
+  cx.fillStyle='#d4902a';
+  cx.font='bold 18px system-ui'; cx.textAlign='right'; cx.textBaseline='middle';
+  cx.fillText(s.score, W-20, 23);
+  cx.fillStyle='rgba(200,160,80,0.5)';
+  cx.font='10px system-ui'; cx.textAlign='right';
+  cx.fillText('SCORE', W-20, 36);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DRAW: FEEDBACK FLASH
+// ═══════════════════════════════════════════════════════════════════════════
+function drawFlash(s){
+  if(s.flashAlpha<=0) return;
+  cx.save();
+  cx.globalAlpha=s.flashAlpha*0.4;
+  cx.fillStyle=s.flashColor;
+  cx.fillRect(0,0,W,H);
+  cx.restore();
+  if(s.flashTxt&&s.flashAlpha>0.3){
+    cx.save();
+    cx.globalAlpha=Math.min(1,(s.flashAlpha-0.3)/0.4);
+    cx.fillStyle=s.flashColor;
+    cx.font='bold 36px system-ui';
+    cx.textAlign='center'; cx.textBaseline='middle';
+    cx.shadowColor='rgba(0,0,0,0.5)'; cx.shadowBlur=12;
+    cx.fillText(s.flashTxt, W/2, H/2-50);
+    cx.restore();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DRAW: ORDER SELECTOR
+// ═══════════════════════════════════════════════════════════════════════════
+function drawOrderSelector(s){
+  const y=548, bw=118, bh=38, gap=10;
+  const totalW=3*bw+2*gap;
+  const startX=(W-totalW)/2;
+  cx.fillStyle='rgba(20,10,3,0.5)';
+  roundRect(startX-10,y-6,totalW+20,bh+12,8,cx.fillStyle,null,0);
+
+  ORDERS.forEach((ord,i)=>{
+    const bx=startX+i*(bw+gap), by=y;
+    const active=s.orderType===ord;
+    const col=ORDER_COLOR[ord];
+    roundRect(bx,by,bw,bh,8,
+      active?col+'33':'rgba(255,255,255,0.05)',
+      active?col:'rgba(255,255,255,0.15)',
+      active?2:1);
+    cx.fillStyle=active?col:'rgba(200,180,150,0.6)';
+    cx.font=`${active?'bold ':''} 12px system-ui`;
+    cx.textAlign='center'; cx.textBaseline='middle';
+    cx.fillText(ORDER_DISPLAY[ord], bx+bw/2, by+bh/2);
+  });
+
+  cx.fillStyle='rgba(180,150,100,0.4)'; cx.font='9px system-ui';
+  cx.textAlign='center'; cx.textBaseline='bottom';
+  cx.fillText('PICK YOUR ORDER', W/2, y-8);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DRAW: PHASE HINT
+// ═══════════════════════════════════════════════════════════════════════════
+function drawHint(s){
+  let txt='';
+  switch(s.phase){
+    case PHASE.IDLE: txt='Waiting…'; break;
+    case PHASE.CUP_IN: txt='Placing your cup…'; break;
+    case PHASE.READY: txt='Hold PULL to start extracting'; break;
+    case PHASE.PULLING:
+      if(s.needle<EX.wkEnd) txt='Keep going — building pressure…';
+      else if(s.needle<EX.okLoEnd) txt='Almost there…';
+      else if(s.needle<=EX.pfEnd) txt='✦ Perfect zone — release now!';
+      else if(s.needle<=EX.okHiEnd) txt='Still ok — release soon';
+      else txt='⚠ Getting bitter — release!';
+      break;
+    case PHASE.PULL_DONE:
+    case PHASE.MILK_IN: txt=s.orderType==='espresso'?'':'Hold POUR for the milk…'; break;
+    case PHASE.POURING:
+      if(s.milkNeedle<ML.thinEnd) txt='Keep pouring…';
+      else if(s.milkNeedle<ML.okLoEnd) txt='A little more…';
+      else if(s.milkNeedle<=ML.pfEnd) txt='✦ Perfect — release for latte art!';
+      else if(s.milkNeedle<=ML.fullEnd) txt='Enough — release now';
+      else txt='⚠ Overfilling — release!';
+      break;
+    case PHASE.LATTE_ART: break;
+    case PHASE.RESULT: txt=s.flashTxt||''; break;
+    default: txt=''; break;
+  }
+  if(!txt) return;
+  cx.fillStyle='rgba(20,10,3,0.5)';
+  cx.font='13px system-ui'; cx.textAlign='center'; cx.textBaseline='middle';
+  const tw=cx.measureText(txt).width;
+  roundRect(W/2-tw/2-12, 505, tw+24, 24, 8, 'rgba(20,10,3,0.5)', null,0);
+  cx.fillStyle=P.txtF;
+  cx.fillText(txt, W/2, 517);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MASTER RENDER
+// ═══════════════════════════════════════════════════════════════════════════
+function render(s){
+  cx.clearRect(0,0,W,H);
+  drawBg();
+  drawSteam(s);
+  drawStream(s);
+  drawMachine(s);
+  drawCup(s);
+  drawPitcher(s);
+  drawGauge(s);
+  drawPullBtn(s);
+  drawHint(s);
+  drawOrderSelector(s);
+  drawHUD(s);
+  drawFlash(s);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  STEAM SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════
+function updateSteam(s, dt){
+  s.steamTimer-=dt;
+  if(s.steamTimer<=0){
+    s.steamTimer=0.08+Math.random()*0.12;
+    const active=s.phase===PHASE.PULLING||s.phase===PHASE.PULL_DONE||
+      s.phase===PHASE.MILK_IN||s.phase===PHASE.POURING||s.phase===PHASE.LATTE_ART;
+    const count=active?2:1;
+    for(let i=0;i<count;i++){
+      const p=mkSteam();
+      // Steam from group head area
+      p.x=220+Math.random()*40; p.y=270+Math.random()*10;
+      s.steam.push(p);
+      // Steam from wand
+      if(Math.random()<0.3){
+        const w=mkSteam(); w.x=406+Math.random()*4; w.y=204;
+        w.vx=-2+Math.random()*8; w.vy=-15-Math.random()*10;
+        s.steam.push(w);
+      }
+    }
+  }
+  for(const p of s.steam){
+    p.x+=p.vx*dt; p.y+=p.vy*dt;
+    p.vx*=(1-dt*0.5);
+    const frac=1-p.life/p.maxLife;
+    p.alpha=frac<0.2?frac/0.2:frac>0.7?(1-frac)/0.3:1;
+    p.r+=dt*3;
+    p.life-=dt;
+  }
+  s.steam=s.steam.filter(p=>p.life>0&&p.y>-20);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  PHASE LOGIC
+// ═══════════════════════════════════════════════════════════════════════════
+function setPhase(p){
+  S.phase=p; S.phaseT=0;
+}
+
+function flash(color,txt,score){
+  S.flashColor=color; S.flashTxt=txt;
+  S.flashAlpha=1;
+  if(score) S.score+=score;
+}
+
+function finishExtraction(){
+  const g=gradeEx(S.needle);
+  S.grade=g;
+  S.pulling=false;
+  S.streamAlpha=0;
+  // Fill cup based on grade
+  S.cupFill=g==='weak'?0.55:g==='perfect'?0.75:g==='ok'?0.65:0.5;
+  S.cupCrema=g==='perfect'?1:g==='ok'?0.6:0.3;
+  if(S.orderType==='espresso'){
+    // Score now
+    const pts=g==='perfect'?30:g==='ok'?15:0;
+    if(g==='perfect') flash('#f0a030','✦ Perfect!',pts), S.stats.perfect++;
+    else if(g==='ok') flash('#e0d060','OK Shot',pts), S.stats.ok++;
+    else flash('#e04040',g==='weak'?'Too Weak':'Too Bitter',0), S.stats.bad++;
+    S.served++;
+    setPhase(PHASE.RESULT);
+  } else {
+    // Need milk step
+    setPhase(PHASE.PULL_DONE);
+  }
+}
+
+function finishMilk(){
+  const g=gradeMilk(S.milkNeedle);
+  S.milkGrade=g;
+  S.milkPulling=false;
+  S.milkStreamAlpha=0;
+  S.cupMilk=g==='too_much'?0.95:g==='perfect'?0.7:g==='ok'?0.55:0.35;
+
+  const exG=S.grade;
+  const both=(exG==='perfect'&&g==='perfect')?'perfect':
+    (exG==='weak'||g==='thin'||exG==='bitter'||g==='too_much')?'bad':'ok';
+  const pts=both==='perfect'?30:both==='ok'?15:0;
+  if(both==='perfect'){flash('#f0a030','✦ Perfect Latte!',pts);S.stats.perfect++;}
+  else if(both==='ok'){flash('#e0d060','Good Latte',pts);S.stats.ok++;}
+  else{flash('#e04040','Needs Work',0);S.stats.bad++;}
+  S.served++;
+
+  if(both==='perfect'||both==='ok'){
+    setPhase(PHASE.LATTE_ART);
+  } else {
+    setPhase(PHASE.RESULT);
+  }
+}
+
+function tickPhase(dt){
+  S.phaseT+=dt;
+  switch(S.phase){
+    case PHASE.IDLE:
+      if(S.customer&&S.phaseT>0.5) setPhase(PHASE.CUP_IN);
+      break;
+    case PHASE.CUP_IN:
+      S.cupY=Math.max(0, 1-ease.eBack(Math.min(1,S.phaseT/0.6)));
+      if(S.phaseT>0.7) setPhase(PHASE.READY);
+      break;
+    case PHASE.READY:
+      break;
+    case PHASE.PULLING:
+      if(S.pulling){
+        S.needle=Math.min(1, S.needle+NEEDLE_SPD*dt);
+        S.gaugePressure=S.needle*0.85+0.1;
+        S.machineShake=Math.min(1,S.needle*1.5)*0.3;
+        S.streamAlpha=Math.min(1,S.phaseT*8);
+        // Fill cup in real time
+        S.cupFill=S.needle*0.7;
+        if(S.needle>=1) finishExtraction();
+      }
+      break;
+    case PHASE.PULL_DONE:
+      S.gaugePressure=Math.max(0,S.gaugePressure-dt*0.6);
+      S.machineShake=0;
+      if(S.phaseT>0.3){
+        // Slide pitcher in
+        S.pitcherX=Math.max(0,1-ease.eBack(Math.min(1,(S.phaseT-0.3)/0.6)));
+        if(S.pitcherX<0.02) setPhase(PHASE.MILK_IN);
+      }
+      break;
+    case PHASE.MILK_IN:
+      break;
+    case PHASE.POURING:
+      if(S.milkPulling){
+        S.milkNeedle=Math.min(1, S.milkNeedle+MILK_SPD*dt);
+        S.milkStreamAlpha=Math.min(1,S.phaseT*6);
+        S.cupMilk=S.milkNeedle*0.75;
+        if(S.milkNeedle>=1) finishMilk();
+      }
+      break;
+    case PHASE.LATTE_ART:
+      S.latteArtT=Math.min(1,S.phaseT/0.8);
+      S.pitcherX=Math.min(1,S.pitcherX+dt*2);
+      if(S.phaseT>1.2) setPhase(PHASE.RESULT);
+      break;
+    case PHASE.RESULT:
+      S.flashAlpha=Math.max(0,S.flashAlpha-dt*1.5);
+      S.gaugePressure=Math.max(0,S.gaugePressure-dt*0.4);
+      if(S.phaseT>1.0) setPhase(PHASE.SERVE_OUT);
+      break;
+    case PHASE.SERVE_OUT:
+      S.cupY=Math.min(1,ease.in(S.phaseT/0.5));
+      if(S.phaseT>0.6) setPhase(PHASE.NEXT);
+      break;
+    case PHASE.NEXT:
+      if(S.phaseT>0.3){
+        // Reset for next customer
+        S.needle=0; S.milkNeedle=0;
+        S.cupFill=0; S.cupCrema=0; S.cupMilk=0;
+        S.latteArtT=0; S.streamAlpha=0; S.milkStreamAlpha=0;
+        S.gaugePressure=0; S.machineShake=0;
+        S.grade=null; S.milkGrade=null;
+        S.pitcherX=1;
+        if(S.queue.length>0){
+          S.customer=S.queue.shift();
+          S.orderType=S.customer.order;
+          while(S.queue.length<3) S.queue.push(spawnCustomer());
+        } else {
+          S.customer=null;
+        }
+        S.cupY=1;
+        setPhase(S.customer?PHASE.IDLE:PHASE.DONE);
+      }
+      break;
+    case PHASE.DONE:
+      break;
+  }
+  // Gauge pressure idle decay
+  if(S.phase===PHASE.READY||S.phase===PHASE.IDLE||S.phase===PHASE.CUP_IN){
+    S.gaugePressure=Math.max(0.05, S.gaugePressure-dt*0.3);
+  }
+  S.ledPulse=0.6+Math.sin(S.phaseT*3)*0.4;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MAIN LOOP
+// ═══════════════════════════════════════════════════════════════════════════
+function tick(ts){
+  if(!S||S.phase===PHASE.DONE){ render(S||freshState()); return; }
+  const dt=S.lastTs===null?0:Math.min((ts-S.lastTs)/1000,0.08);
+  S.lastTs=ts;
+
+  // Countdown
+  if(S.phase!==PHASE.IDLE&&S.phase!==PHASE.DONE){
+    S.timeLeft=Math.max(0,S.timeLeft-dt);
+    if(S.timeLeft<=0){ endGame(); return; }
+  }
+
+  // Patience drain
+  if(S.customer&&(S.phase===PHASE.IDLE||S.phase===PHASE.READY)){
+    S.customer.patienceLeft-=dt;
+    if(S.customer.patienceLeft<=0){
+      S.stats.missed++;
+      flash('#e04040','✗ Left',0);
+      setPhase(PHASE.SERVE_OUT);
+    }
+  }
+
+  tickPhase(dt);
+  updateSteam(S, dt);
+  render(S);
+  requestAnimationFrame(tick);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  END GAME
+// ═══════════════════════════════════════════════════════════════════════════
+function endGame(){
+  S.phase=PHASE.DONE;
+  render(S);
+  const st=S.stats;
+  const total=st.perfect+st.ok+st.bad+st.missed;
+  const hit=total?Math.round((st.perfect+st.ok)/total*100):0;
+
+  document.getElementById('et').textContent=
+    st.perfect>=3?'☕ Great Barista!':S.score>=30?'Good Shift':'Keep Practising';
+
+  document.getElementById('er').innerHTML=`
+    <div class="row"><span>Perfect shots</span><strong style="color:#60d060">${st.perfect}</strong></div>
+    <div class="row"><span>OK shots</span><strong style="color:#d4a830">${st.ok}</strong></div>
+    <div class="row"><span>Bad shots</span><strong style="color:#d04040">${st.bad}</strong></div>
+    <div class="row"><span>Customers missed</span><strong style="color:#d04040">${st.missed}</strong></div>
+    <div class="row" style="border:none;padding-top:8px"><strong>Total score</strong><strong style="color:#d4902a">${S.score}</strong></div>
+  `;
+
+  const note=hit>=70
+    ? `${hit}% success rate — your timing is solid. The hold-and-release mechanic gives each shot a moment of commitment the dispatch model lacks entirely. The two-step latte interaction (pull + pour) adds meaningful variety without feeling like extra busywork.`
+    : `${hit}% success rate so far — the gauge zone is learnable in a few attempts. Notice how each release feels like a decision: you chose when to let go, and the cup shows it. That's direct agency. Compare to the main game where tap-machine → identical result every time.`;
+  document.getElementById('en').textContent=note;
+
+  document.getElementById('end').classList.add('show');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  INPUT
+// ═══════════════════════════════════════════════════════════════════════════
+function startHold(){
+  if(!S) return;
+  if(S.phase===PHASE.READY){
+    S.pulling=true; setPhase(PHASE.PULLING);
+  } else if(S.phase===PHASE.MILK_IN){
+    S.milkPulling=true; setPhase(PHASE.POURING);
+  }
+}
+function stopHold(){
+  if(!S) return;
+  if(S.pulling){ S.pulling=false; finishExtraction(); }
+  if(S.milkPulling){ S.milkPulling=false; finishMilk(); }
+}
+function handleDown(e){
+  e.preventDefault();
+  // Check if tap is on button or order selector
+  const rect=cv.getBoundingClientRect();
+  const scaleX=W/rect.width;
+  const pt=e.touches?e.touches[0]:e;
+  const px=(pt.clientX-rect.left)*scaleX;
+  const py=(pt.clientY-rect.top)*scaleX;
+
+  // Order selector tap
+  const selY=548, bw=118, bh=38, gap=10;
+  const totalW=3*bw+2*gap, startX=(W-totalW)/2;
+  ORDERS.forEach((ord,i)=>{
+    const bx=startX+i*(bw+gap);
+    if(px>=bx&&px<=bx+bw&&py>=selY&&py<=selY+bh){
+      if(S.phase===PHASE.IDLE||S.phase===PHASE.DONE){
+        S.orderType=ord;
+        if(S.customer) S.customer.order=ord;
+      }
+    }
+  });
+
+  // Button tap
+  const dx=px-BTN.x, dy=py-BTN.y;
+  if(Math.sqrt(dx*dx+dy*dy)<BTN.r+10) startHold();
+}
+function handleUp(){ stopHold(); }
+
+cv.addEventListener('pointerdown',handleDown,{passive:false});
+window.addEventListener('pointerup',handleUp);
+window.addEventListener('keydown',(e)=>{ if((e.code==='Space'||e.code==='KeyZ')&&!e.repeat){e.preventDefault();startHold();} });
+window.addEventListener('keyup',(e)=>{ if(e.code==='Space'||e.code==='KeyZ') stopHold(); });
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════════════════════
+function startGame(){
+  document.getElementById('end').classList.remove('show');
+  S=freshState();
+  // Build queue
+  for(let i=0;i<4;i++) S.queue.push(spawnCustomer());
+  S.customer=S.queue.shift();
+  S.orderType=S.customer.order;
+  S.cupY=1; // start cup off-screen
+  setPhase(PHASE.IDLE);
+  requestAnimationFrame(tick);
+}
+startGame();
+</script>
+</body>
+</html>

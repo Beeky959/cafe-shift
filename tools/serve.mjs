@@ -1,13 +1,16 @@
 // @ts-check
 /**
  * Zero-dependency static server for local development.
- * Usage: node tools/serve.mjs [port]      (default 5173, or the PORT variable)
- * Serves the repository root on 127.0.0.1 only.
+ * Usage: node tools/serve.mjs [port] [--lan]   (default port 5173, or the PORT variable)
+ * Serves the repository root on 127.0.0.1 only. With --lan it listens on
+ * every network interface instead, so a phone on the same Wi-Fi can open it;
+ * only use that on a network you trust.
  */
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { networkInterfaces } from 'node:os';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const HOST = '127.0.0.1';
@@ -44,9 +47,10 @@ function resolvePath(urlPath) {
 
 /**
  * @param {number} [port] 0 picks a free port.
+ * @param {string} [host] Interface to listen on. Defaults to this computer only.
  * @returns {Promise<{ url: string, port: number, close: () => Promise<void> }>}
  */
-export function startServer(port = 5173) {
+export function startServer(port = 5173, host = HOST) {
   const server = createServer(async (req, res) => {
     /**
      * @param {number} code
@@ -82,7 +86,7 @@ export function startServer(port = 5173) {
 
   return new Promise((ok, fail) => {
     server.once('error', fail);
-    server.listen(port, HOST, () => {
+    server.listen(port, host, () => {
       const address = server.address();
       const actual = typeof address === 'object' && address ? address.port : port;
       ok({
@@ -95,13 +99,25 @@ export function startServer(port = 5173) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const wanted = Number(process.argv[2] ?? process.env.PORT ?? 5173);
+  const args = process.argv.slice(2);
+  const lan = args.includes('--lan');
+  const portText = args.find((a) => a !== '--lan') ?? process.env.PORT ?? '5173';
+  const wanted = Number(portText);
   if (!Number.isInteger(wanted) || wanted < 0 || wanted > 65535) {
-    console.error(`Invalid port: ${process.argv[2] ?? process.env.PORT}`);
+    console.error(`Invalid port: ${portText}`);
     process.exit(1);
   }
-  startServer(wanted).then(
-    ({ url }) => console.log(`Café Shift is being served at ${url}  (Ctrl+C to stop)`),
+  startServer(wanted, lan ? '0.0.0.0' : HOST).then(
+    ({ url, port }) => {
+      console.log(`Café Shift is being served at ${url}  (Ctrl+C to stop)`);
+      if (!lan) return;
+      console.log('Also on this network, for a phone on the same Wi-Fi:');
+      for (const list of Object.values(networkInterfaces())) {
+        for (const net of list ?? []) {
+          if (net.family === 'IPv4' && !net.internal) console.log(`  http://${net.address}:${port}/`);
+        }
+      }
+    },
     (error) => {
       console.error(`Could not start the server: ${error.message}`);
       process.exit(1);

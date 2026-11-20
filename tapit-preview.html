@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TapIt visual components — Byte Builds: Café Shift</title>
+<link rel="icon" href="data:,">
+<style>
+  html, body { margin: 0; background: #17171f; color: #f3ead4; font-family: ui-rounded, system-ui, sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 20px; margin: 4px 0 6px; }
+  p { margin: 4px 0 12px; color: #c9bfb2; font-size: 14px; line-height: 1.5; }
+  canvas { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 12px; background: #fceccd; }
+  .note { border-left: 4px solid #ff7600; padding-left: 10px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>TapIt visual components</h1>
+  <p class="note">Drawings prepared for the TapIt milestone. They are not part of the game yet: no guest uses a stand, and nothing here changes scoring.</p>
+  <canvas id="preview" width="1920" height="1080" aria-label="An animated preview: a phone taps a TapIt stand, and a café's page opens with its menu, Wi-Fi, Instagram, website and review links."></canvas>
+  <p>Left: the counter stand. Middle: a tap, looping. Right: the café's branded page, opening its Wi-Fi link. The café and its page are fictional.</p>
+</main>
+<script type="module" src="src/tapit-preview.js"></script>
+</body>
+</html>

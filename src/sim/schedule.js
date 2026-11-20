@@ -3,7 +3,7 @@
  * Builds the guest schedule for a shift. Pure: the same shift config and seed
  * always give the same schedule. See docs/TECH_BLUEPRINT.md §3.
  */
-/** @import { GuestSpec, GuestQuestion, OrderItem } from './types.js' */
+/** @import { GuestSpec, GuestQuestion, GuestPersonality, OrderItem, DrinkItem } from './types.js' */
 /** @import { ShiftConfig } from './config.js' */
 import { CONFIG, toTicks } from './config.js';
 import { createRng, shuffled, streamSeed } from './rng.js';
@@ -25,8 +25,18 @@ function validateShift(shift) {
   if (shift.croissantGuests > shift.guests) {
     throw new RangeError(`Shift "${shift.id}": more croissant guests than guests`);
   }
+  const espresso = shift.espressoGuests ?? 0;
+  const mocha = shift.mochaGuests ?? 0;
+  if (espresso + mocha + shift.croissantGuests > shift.guests) {
+    throw new RangeError(`Shift "${shift.id}": espresso + mocha + croissant exceeds total guests`);
+  }
   if (shift.supportedQuestionGuests + shift.unsupportedQuestionGuests > shift.guests) {
     throw new RangeError(`Shift "${shift.id}": more question guests than guests`);
+  }
+  const impatient = shift.impatientGuests ?? 0;
+  const patient = shift.patientGuests ?? 0;
+  if (impatient + patient > shift.guests) {
+    throw new RangeError(`Shift "${shift.id}": impatient + patient exceeds total guests`);
   }
   if (shift.standUseFraction < 0 || shift.standUseFraction > 1) {
     throw new RangeError(`Shift "${shift.id}": standUseFraction must be within 0–1`);
@@ -34,9 +44,9 @@ function validateShift(shift) {
   if (
     shift.firstArrivalSeconds < 0 ||
     shift.lastArrivalSeconds < shift.firstArrivalSeconds ||
-    shift.lastArrivalSeconds > shift.lengthSeconds
+    shift.lastArrivalSeconds >= shift.lengthSeconds
   ) {
-    throw new RangeError(`Shift "${shift.id}": arrival times must lie inside the shift`);
+    throw new RangeError(`Shift "${shift.id}": arrivals must start at or after 0 and end before the doors close`);
   }
 }
 
@@ -69,9 +79,24 @@ export function buildSchedule(shift, seed) {
   }
   arrivals.sort((a, b) => a - b);
 
-  // Orders: an exact number of croissants, dealt to shuffled positions.
+  // Orders: exact counts of croissants, espressos, mochas; rest are lattes.
   const positions = Array.from({ length: n }, (_, i) => i);
-  const croissantAt = new Set(shuffled(positions, rngFor('orders')).slice(0, shift.croissantGuests));
+  const orderShuffle = shuffled(positions, rngFor('orders'));
+  const croissantAt = new Set(orderShuffle.slice(0, shift.croissantGuests));
+  // Among non-croissant positions, assign espresso and mocha; rest get latte.
+  const drinkPositions = orderShuffle.filter((p) => !croissantAt.has(p));
+  const espressoCount = shift.espressoGuests ?? 0;
+  const mochaCount = shift.mochaGuests ?? 0;
+  /** @type {Map<number, DrinkItem>} */
+  const drinkAt = new Map();
+  for (let i = 0; i < drinkPositions.length; i++) {
+    if (i < espressoCount) {
+      drinkAt.set(drinkPositions[i], 'espresso');
+    } else if (i < espressoCount + mochaCount) {
+      drinkAt.set(drinkPositions[i], 'mocha');
+    }
+    // rest default to 'latte' (handled in map below)
+  }
 
   // Questions: exact counts. Supported topics are dealt round-robin from a
   // shuffled list so every topic appears before any repeats.
@@ -101,6 +126,15 @@ export function buildSchedule(shift, seed) {
   const standUsers = Math.round(shift.supportedQuestionGuests * shift.standUseFraction);
   const standAt = new Set(shuffled(supportedAt, rngFor('stand')).slice(0, standUsers));
 
+  // Personalities: exact counts of impatient and patient; rest are regular.
+  const personalityOrder = shuffled(positions, rngFor('personalities'));
+  const impatientCount = shift.impatientGuests ?? 0;
+  const patientCount = shift.patientGuests ?? 0;
+  /** @type {Map<number, GuestPersonality>} */
+  const personalityAt = new Map();
+  personalityOrder.slice(0, impatientCount).forEach((p) => personalityAt.set(p, 'impatient'));
+  personalityOrder.slice(impatientCount, impatientCount + patientCount).forEach((p) => personalityAt.set(p, 'patient'));
+
   const seatRng = rngFor('seats');
   const lookRng = rngFor('looks');
   const seatMin = toTicks(CONFIG.seatSeconds.min);
@@ -108,13 +142,16 @@ export function buildSchedule(shift, seed) {
 
   return arrivals.map((arrivalTick, position) => {
     /** @type {OrderItem} */
-    const order = croissantAt.has(position) ? 'croissant' : 'latte';
+    const order = croissantAt.has(position)
+      ? 'croissant'
+      : drinkAt.get(position) ?? 'latte';
     return {
       id: position + 1,
       arrivalTick,
       order,
       question: questionAt.get(position) ?? null,
       usesStandIfPresent: standAt.has(position),
+      personality: personalityAt.get(position) ?? 'regular',
       seatTicks: seatRng.range(seatMin, seatMax),
       look: lookRng.int(CONFIG.guestLooks),
     };

@@ -6,7 +6,7 @@
  * Definitions: docs/GAME_DESIGN.md §3a and docs/TECH_BLUEPRINT.md §4.
  */
 /** @import { SimState, LiveGuest, GuestState } from './types.js' */
-import { CONFIG } from './config.js';
+import { CONFIG, isDrink } from './config.js';
 
 /** Guest states in which the guest has been served and holds a dish. */
 const HOLDS_DISH = /** @type {ReadonlySet<GuestState>} */ (
@@ -91,6 +91,10 @@ export function checkInvariants(state) {
   }
   for (const [i, slot] of state.machine.slots.entries()) {
     must((slot.state === 'empty') === (slot.dishId === null), `machine slot ${i}: state and dish disagree`);
+    must((slot.state === 'empty') === (slot.drink === null), `machine slot ${i}: state and drink disagree`);
+    if (slot.drink !== null) {
+      must(isDrink(slot.drink), `machine slot ${i}: drink "${slot.drink}" is not a valid drink type`);
+    }
     must(wholeNonNegative(slot.ticksLeft), `machine slot ${i}: bad timer`);
     if (slot.dishId !== null) {
       const h = dishById.get(slot.dishId)?.holder;
@@ -173,10 +177,28 @@ export function checkInvariants(state) {
     must(!c.pass || state.pass.claimedBy === action.id, 'the current action claims the pass, which is not marked');
     must(c.tableId === null || state.tables.find((t) => t.id === c.tableId)?.claimedBy === action.id, 'the current action claims a table that is not marked');
     must(c.sinkDishId === null || dishById.get(c.sinkDishId)?.holder.kind === 'sink', 'the current action is washing a dish that is not in the sink');
+    must(!c.oven || state.oven.claimedBy === action.id, 'the current action claims the oven, which is not marked');
     must((action.kind === 'brewStart' || action.kind === 'plate') === (action.reservedDishId !== null), 'only start-brew and plate actions hold a reserved dish, and they always do');
+    if (action.kind === 'brewStart') {
+      must(c.drinkType !== null && isDrink(c.drinkType), 'brewStart action must have a valid drinkType');
+    }
   }
   const queueIds = state.owner.queue.map((q) => q.id);
   must(new Set(queueIds).size === queueIds.length && queueIds.every((id) => id < state.owner.nextActionId && id !== actionId), 'queued action ids must be unique, issued, and not the current action');
+
+  // ---- Oven.
+  const oven = state.oven;
+  must(['empty', 'baking', 'ready'].includes(oven.state), `oven: unknown state "${oven.state}"`);
+  must(wholeNonNegative(oven.ticksLeft), 'oven: bad timer');
+  must(oven.state === 'baking' || oven.ticksLeft === 0, 'oven: timer should be 0 when not baking');
+  if (oven.claimedBy !== null) {
+    must(oven.claimedBy === actionId && action?.claims.oven === true, 'oven is claimed by an action that is not current');
+  }
+
+  // ---- Pastry stock.
+  const ps = state.pastryStock;
+  must(wholeNonNegative(ps.display), 'pastryStock.display must be non-negative');
+  must(ps.display <= ps.maxDisplay, `pastryStock.display (${ps.display}) exceeds max (${ps.maxDisplay})`);
 
   // ---- Stand.
   must(state.stand.installed || standIds.length === 0, 'guests at a stand that is not installed');
@@ -198,6 +220,7 @@ export function checkInvariants(state) {
     must(action === null && state.owner.queue.length === 0, 'owner actions remain after the shift ended');
     must(state.dishes.every((d) => d.holder.kind === 'rack' || d.holder.kind === 'sink'), 'after the shift ended every dish must be in the rack or the sink');
     must(state.tables.every((t) => t.state === 'clean' || t.state === 'dirty'), 'tables are occupied or being wiped after the shift ended');
+    must(state.oven.state === 'empty', 'oven should be empty after the shift ended');
     must(state.nextArrivalIndex === state.schedule.length, 'scheduled guests never arrived');
   }
 
@@ -213,6 +236,7 @@ export function checkInvariants(state) {
     ...Object.values(state.metrics.spotTicks),
     ...Object.values(state.metrics.guests),
     state.metrics.allSpotsFullTicks,
+    state.metrics.tips,
   ];
   must(counters.every(wholeNonNegative), 'a metric is negative or not a whole number');
 

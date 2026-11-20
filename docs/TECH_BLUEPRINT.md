@@ -34,7 +34,8 @@ No production code is included. Tables describe behaviour; names are proposals.
 | `sim/invariants` | Checks ownership and accounting rules on any state | sim only |
 | `sim/digest` | Stable fingerprint of a state, for determinism tests | nothing |
 | `sim/types` | JSDoc type definitions | nothing |
-| `sim/step` (M1) | Advances state by one tick, applies commands, returns events | sim only |
+| `sim/step` | Advances state by one tick, applies commands, returns events | sim only |
+| `sim/replay` | Plays or replays a whole shift | sim only |
 | `sim/customers`, `sim/owner`, `sim/stations`, `sim/upgrades` | Rules for each entity | sim only |
 | `view/renderer` | Canvas setup, pixel ratio, cached background layer, draw order | view, reads sim state |
 | `view/scene` | Positions and hit areas for everything tappable | nothing |
@@ -62,6 +63,16 @@ pointer → input → command → sim.step(state, dt, commands) → events
 - **Fixed time step** of 1/30 s for rules, with rendering every frame. Time is an integer tick count and every duration is converted to whole ticks once, when the state is created. Results do not depend on frame rate, and a run can be replayed from seed plus commands.
 - **Commands** are taps on a target: machine, case, sink, stand, a table, a customer, or a queued action.
 - **Events** are facts: guest arrived, brew started, brew finished, item handed over, coins earned, question answered, table wiped, dish washed, action cancelled, guest left happy, guest left unhappy, guest tapped stand, shift ended. Each event carries its tick and a sequence number.
+
+### As implemented in M1
+
+- `step(state, commands)` advances the state by one tick **in place** and returns that tick's events. After the shift has ended it does nothing.
+- **Commands:** `tap` on a target (`machine`, `case`, `sink`, a counter `spot`, a `table`), `cancel` the current action, `unqueue` a waiting action. `resolveTap(state, target)` says what a tap would do, or why it would be refused, without changing anything; a tap is checked when it arrives and again when its action starts.
+- **Queue:** the current action plus two waiting (`CONFIG.queueMax`). The same action cannot be queued twice.
+- **Events:** `shiftOpened`, `guestArrived`, `guestWalkedPast`, `guestWaiting`, `guestPromoted`, `actionQueued`, `actionStarted`, `actionCompleted`, `actionCancelled`, `actionDropped`, `actionUnqueued`, `tapRejected`, `commandRejected`, `brewStarted`, `brewReady`, `croissantPlated`, `itemHandedOver`, `guestAsked`, `questionAnswered`, `guestToTable`, `guestStanding`, `guestSeated`, `guestLeftHappy`, `guestLeftUnhappy`, `tableWiped`, `dishWashed`, `doorsClosed`, `shiftEnded`.
+- **Score** is set when the shift ends: gross earnings plus the mood bonus, where mood is the share of scheduled guests who left happy.
+- `runShift(options, decide)` plays a whole shift from a decision function and records the commands; `replay(options, commandLog)` reproduces it exactly.
+- A state with the stand installed is rejected until M4.
 
 ### Seeded guest schedule *(added after review)*
 

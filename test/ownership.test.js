@@ -25,6 +25,7 @@ const guest = (id, state, place, dishId) => ({
   attendedBy: null,
   patienceLeft: 100,
   timerLeft: 0,
+  tipEligible: false,
 });
 
 /**
@@ -39,8 +40,9 @@ const action = (id, kind, claims, reservedDishId = null) => ({
   kind,
   phase: 'working',
   ticksLeft: 5,
+  zone: 'counter',
   reservedDishId,
-  claims: { guestId: null, slot: null, pass: false, tableId: null, sinkDishId: null, ...claims },
+  claims: { guestId: null, slot: null, pass: false, tableId: null, sinkDishId: null, drinkType: null, oven: false, ...claims },
 });
 
 /**
@@ -68,7 +70,7 @@ function handOverScene() {
   s.dishes[1].holder = { kind: 'machine', slot: 0 };
   s.dishes[2].holder = { kind: 'guest', guestId: 4 };
   s.dishes[3].holder = { kind: 'sink' };
-  s.machine.slots[0] = { state: 'ready', dishId: 2, ticksLeft: 0, claimedBy: 7 };
+  s.machine.slots[0] = { state: 'ready', dishId: 2, drink: 'latte', ticksLeft: 0, claimedBy: 7 };
   s.owner.action = action(7, 'handOver', { guestId: 2, slot: 0 });
   s.owner.queue = [{ id: 8, kind: 'wash', guestId: null, tableId: null }];
   s.owner.nextActionId = 9;
@@ -89,7 +91,7 @@ function brewStartScene() {
   s.spots = [1, null, null];
   s.dishes[4].holder = { kind: 'reserved', actionId: 3 };
   s.machine.slots[0].claimedBy = 3;
-  s.owner.action = action(3, 'brewStart', { slot: 0 }, 5);
+  s.owner.action = action(3, 'brewStart', { slot: 0, drinkType: 'latte' }, 5);
   s.owner.nextActionId = 4;
   return s;
 }
@@ -250,7 +252,7 @@ test('shift termination: nothing is left held, claimed or in progress', () => {
 
   const itemLeft = structuredClone(ended);
   itemLeft.dishes[1].holder = { kind: 'machine', slot: 0 };
-  itemLeft.machine.slots[0] = { state: 'ready', dishId: 2, ticksLeft: 0, claimedBy: null };
+  itemLeft.machine.slots[0] = { state: 'ready', dishId: 2, drink: 'latte', ticksLeft: 0, claimedBy: null };
   assertProblem(itemLeft, /every dish must be in the rack or the sink/);
 
   const guestLeft = structuredClone(ended);

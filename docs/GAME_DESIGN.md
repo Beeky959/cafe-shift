@@ -153,7 +153,7 @@ These are the only permitted moves:
 | Seated time | 8–12 s |
 | Standing time | 4 s |
 | Latte / croissant | 8 / 6 coins |
-| Tip when seated and served with over half patience left | 3 coins |
+| Tip when seated and served with over 35% of counter patience left | 4 coins *(tuned in M1 from "over half" and 3 coins, to meet gate B3)* |
 | Guests with a question, from Shift 2 | about 1 in 2, as an exact count fixed in the schedule |
 | Owner travel between stations | 0.3 s |
 | Guest walk in / to a table / to the stand | 1.0 / 0.8 / 0.6 s |
