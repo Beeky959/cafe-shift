@@ -16,8 +16,9 @@ import { drawSinkScene } from './station-sink.js';
 import { drawOvenScene } from './station-oven.js';
 import { drawHandoffScene } from './station-handoff.js';
 import { drawTapItScene } from './station-tapit.js';
+import { drawEspressoScene, resetEspresso } from './station-espresso.js';
 
-/** @typedef {'sink' | 'oven' | 'handoff' | 'tapit'} OverlayType */
+/** @typedef {'sink' | 'oven' | 'handoff' | 'tapit' | 'espresso'} OverlayType */
 
 /**
  * @param {HTMLElement} panel
@@ -87,7 +88,8 @@ function _create(panel, canvas) {
       case 'sink':    drawSinkScene(cx, W, H, state, elapsed, pointerX, pointerY, pressed); break;
       case 'oven':    drawOvenScene(cx, W, H, state, elapsed, pointerX, pointerY, pressed); break;
       case 'handoff': drawHandoffScene(cx, W, H, state, elapsed, pointerX, pointerY, pressed); break;
-      case 'tapit':   drawTapItScene(cx, W, H, state, elapsed, pointerX, pointerY, pressed); break;
+      case 'tapit':    drawTapItScene(cx, W, H, state, elapsed, pointerX, pointerY, pressed); break;
+      case 'espresso': drawEspressoScene(cx, W, H, state, elapsed, pointerX, pointerY, pressed); break;
     }
 
     cx.restore();
@@ -101,6 +103,7 @@ function _create(panel, canvas) {
 
     /** @param {OverlayType} t @param {SimState} state */
     open(t, state) {
+      if (t === 'espresso') resetEspresso();
       type = t;
       elapsed = 0;
       slideT = 0;

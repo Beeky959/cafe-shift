@@ -19,6 +19,31 @@ import { resolveTap, isDrink } from '../sim/index.js';
 import { HIT_AREAS, SCENE_HEIGHT, SCENE_WIDTH } from './scene.js';
 import * as art from './art.js';
 import { CAST, OWNER, byte, person, sparkle } from './characters.js';
+
+/** The NPC barista helper who works the espresso machine. */
+const BARISTA = /** @type {import('./characters.js').Look} */ ({
+  skin: '#d4a070', hair: '#1a1410', hairStyle: 'bun',
+  top: '#3a5a50', topShade: '#2c4640', pants: '#2c2c38',
+  shoes: '#2b2626', apron: '#c06020', height: 0.98,
+});
+/** The NPC baker who helps at the oven. */
+const BAKER = /** @type {import('./characters.js').Look} */ ({
+  skin: '#c08860', hair: '#3c2010', hairStyle: 'short',
+  top: '#e8e0d0', topShade: '#c8c0a8', pants: '#4a4030',
+  shoes: '#302820', apron: '#d8d0c0', height: 1.02,
+});
+/** The NPC dishwasher who helps at the sink. */
+const DISHWASHER = /** @type {import('./characters.js').Look} */ ({
+  skin: '#8c6040', hair: '#181818', hairStyle: 'short',
+  top: '#304858', topShade: '#243848', pants: '#283040',
+  shoes: '#202828', apron: '#c8d8e0', height: 1.05,
+});
+/** The NPC server who helps at the handoff counter. */
+const SERVER = /** @type {import('./characters.js').Look} */ ({
+  skin: '#e8c090', hair: '#5c3820', hairStyle: 'bun',
+  top: '#1c2840', topShade: '#141e30', pants: '#1c1c28',
+  shoes: '#181818', apron: null, height: 0.96,
+});
 import { STAGE, clothAt, guestClip, machineClip, ovenClip, ownerClip, passClip, seatOf, sinkClip, standClip, tableCentre, tableDirt } from './clips.js';
 import { PROPS, chair, cloth, cupWithFill, dishInHand, drawBackground, drawForeground, drawLightGlow, drawMachine, drawOven, drawPass, drawRack, drawSink, drawStand, drawTableTop, steam } from './props.js';
 import { phases, smooth as smoothU, easeOut, easeOutBack, anticipateSettle, bounce, arc, secondaryBob, secondarySwing, hipShift, shoulderCounter } from './anim-utils.js';
@@ -40,6 +65,7 @@ const QUEUE_SCALE = 0.88;
  * @property {{ item: OrderItem, x: number, y: number } | null} drag An item being dragged, in scene units.
  * @property {Animator} anim
  * @property {boolean} reducedMotion
+ * @property {Set<string>} [staff] Unlocked NPC staff members.
  */
 
 /**
@@ -209,6 +235,66 @@ export function createRenderer(canvas) {
       time: time * motion,
       lookX: anxious ? -0.8 : Math.sin(time * 0.4) * 0.5 * motion,
     });
+
+    // ---- NPC staff: each visible only when that role has been unlocked.
+    const staff = view.staff;
+    if (staff?.has('barista')) {
+      const brewing = state.machine.slots.some((s) => s.state === 'brewing');
+      const NPC_X = PROPS.machine.x + PROPS.machine.w + 18;
+      const NPC_Y = PROPS.machine.y + PROPS.machine.h + 10;
+      cx.save(); cx.globalAlpha = 0.12; cx.fillStyle = '#3b2a20';
+      cx.beginPath(); cx.ellipse(NPC_X, NPC_Y + 4, 22, 7, 0, 0, Math.PI * 2); cx.fill(); cx.restore();
+      const breathe = Math.sin(time * 1.3) * 0.5 * motion;
+      person(cx, NPC_X, NPC_Y, 0.82, BARISTA, {
+        hideLegs: true, facing: -1, breathe,
+        lean: brewing ? -0.08 * motion : 0,
+        leftHand: brewing ? { x: NPC_X - 42, y: NPC_Y - 108 } : null,
+        rightHand: brewing ? { x: NPC_X - 28, y: NPC_Y - 90 } : null,
+        face: { eyes: brewing ? 'closed' : 'open', mouth: brewing ? 'neutral' : 'smile', lookX: -0.6 },
+      });
+    }
+    if (staff?.has('baker')) {
+      const baking = state.oven.state === 'baking';
+      const NPC_X = PROPS.oven.x - 20;
+      const NPC_Y = PROPS.oven.y + PROPS.oven.h + 8;
+      cx.save(); cx.globalAlpha = 0.12; cx.fillStyle = '#3b2a20';
+      cx.beginPath(); cx.ellipse(NPC_X, NPC_Y + 4, 22, 7, 0, 0, Math.PI * 2); cx.fill(); cx.restore();
+      const breathe = Math.sin(time * 0.9 + 1) * 0.5 * motion;
+      person(cx, NPC_X, NPC_Y, 0.82, BAKER, {
+        hideLegs: true, facing: 1, breathe,
+        lean: baking ? 0.06 * motion : 0,
+        leftHand: baking ? { x: NPC_X + 32, y: NPC_Y - 100 } : null,
+        face: { eyes: 'open', mouth: baking ? 'neutral' : 'smile', lookX: 0.5 },
+      });
+    }
+    if (staff?.has('dishwasher')) {
+      const washing = state.owner.action?.kind === 'wash';
+      const NPC_X = PROPS.sink.basin.x - 36;
+      const NPC_Y = PROPS.sink.y + PROPS.sink.h + 6;
+      cx.save(); cx.globalAlpha = 0.12; cx.fillStyle = '#3b2a20';
+      cx.beginPath(); cx.ellipse(NPC_X, NPC_Y + 4, 22, 7, 0, 0, Math.PI * 2); cx.fill(); cx.restore();
+      const breathe = Math.sin(time * 1.1 + 2) * 0.5 * motion;
+      person(cx, NPC_X, NPC_Y, 0.82, DISHWASHER, {
+        hideLegs: true, facing: 1, breathe,
+        lean: washing ? -0.05 * motion : 0,
+        leftHand: washing ? { x: NPC_X + 20, y: NPC_Y - 95 } : null,
+        rightHand: washing ? { x: NPC_X + 36, y: NPC_Y - 85 } : null,
+        face: { eyes: 'open', mouth: 'neutral', lookX: 0.4 },
+      });
+    }
+    if (staff?.has('server')) {
+      const serving = state.owner.action?.kind === 'handOver';
+      const NPC_X = PROPS.pass.x + 32;
+      const NPC_Y = PROPS.pass.y - 10;
+      cx.save(); cx.globalAlpha = 0.12; cx.fillStyle = '#3b2a20';
+      cx.beginPath(); cx.ellipse(NPC_X, NPC_Y + 4, 22, 7, 0, 0, Math.PI * 2); cx.fill(); cx.restore();
+      const breathe = Math.sin(time * 1.2 + 3) * 0.5 * motion;
+      person(cx, NPC_X, NPC_Y, 0.82, SERVER, {
+        hideLegs: true, facing: -1, breathe,
+        lean: serving ? -0.04 * motion : 0,
+        face: { eyes: 'open', mouth: serving ? 'smile' : 'neutral', lookX: -0.5 },
+      });
+    }
 
     // ---- The owner.
     const oClip = ownerClip(state);

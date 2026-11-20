@@ -23,7 +23,7 @@ const NOTICE_MS = 2200;
 /** A press that moves less than this, in scene units, is a tap, not a drag. */
 const DRAG_THRESHOLD = 24;
 
-/** @typedef {'intro' | 'missionSelect' | 'playing' | 'paused' | 'ended' | 'shop'} GamePhase */
+/** @typedef {'intro' | 'missionSelect' | 'playing' | 'paused' | 'ended' | 'shop' | 'cutscene'} GamePhase */
 /** @typedef {import('./ui/byte.js').Mood} Mood */
 
 /**
@@ -51,9 +51,23 @@ const UPGRADES = Object.freeze([
   { id: 'pastry-warmer', name: 'Pastry Warmer', desc: 'Pre-warmed pastries — pastry prep takes 20% less time.', cost: 50 },
 ]);
 
+/**
+ * Which NPC unlocks after first-clearing each mission index.
+ * @type {Readonly<Record<number, string>>}
+ */
+const NPC_STAFF = Object.freeze({ 0: 'barista', 1: 'baker', 2: 'dishwasher', 3: 'server' });
+
+/** Display names and intro lines for each NPC. */
+const NPC_INFO = Object.freeze(/** @type {Record<string, { name: string, role: string, lines: string[] }>} */ ({
+  barista: { name: 'Maya', role: 'Barista', lines: ['She joined your team after seeing how hard you worked on Opening Day.', 'Maya knows espresso inside out — your brew times are much faster now.'] },
+  baker:   { name: 'Carlos', role: 'Baker',   lines: ['Carlos heard about the morning rush and wanted in.', 'With him at the oven, pastry prep time is cut way down.'] },
+  dishwasher: { name: 'Sam', role: 'Dishwasher', lines: ['Sam was impressed by how you handled the digital chaos.', 'Dishes get cleaned twice as fast with their help.'] },
+  server:  { name: 'Zoe',   role: 'Server',  lines: ['Zoe is a people person — perfect for the floor.', 'Hand-offs to guests are noticeably quicker with her around.'] },
+}));
+
 // ---- localStorage save/load ----
 const SAVE_KEY = 'cafe-shift-progress';
-const SAVE_VERSION = 1;
+const SAVE_VERSION = 2;
 
 /**
  * @typedef {object} SaveData
@@ -61,6 +75,7 @@ const SAVE_VERSION = 1;
  * @property {number} wallet
  * @property {string[]} purchased
  * @property {number[]} completedMissions
+ * @property {string[]} staff
  */
 
 /** @returns {SaveData | null} */
@@ -70,22 +85,24 @@ function loadProgress() {
     if (!raw) return null;
     const data = JSON.parse(raw);
     if (!data || typeof data !== 'object') return null;
-    if (data.version !== SAVE_VERSION) {
-      // Future: migrate from older versions. For now, treat as corrupt.
-      return null;
+    // Migrate from version 1 (no staff field)
+    if (data.version === 1) {
+      data.staff = [];
+      data.version = 2;
     }
-    if (typeof data.wallet !== 'number' || !Array.isArray(data.purchased) || !Array.isArray(data.completedMissions)) return null;
-    // Validate types
+    if (data.version !== SAVE_VERSION) return null;
+    if (typeof data.wallet !== 'number' || !Array.isArray(data.purchased) || !Array.isArray(data.completedMissions) || !Array.isArray(data.staff)) return null;
     if (!data.purchased.every(/** @param {unknown} x */ (x) => typeof x === 'string')) return null;
     if (!data.completedMissions.every(/** @param {unknown} x */ (x) => typeof x === 'number')) return null;
+    if (!data.staff.every(/** @param {unknown} x */ (x) => typeof x === 'string')) return null;
     return /** @type {SaveData} */ (data);
   } catch {
     return null;
   }
 }
 
-/** @param {number} wallet @param {Set<string>} purchased @param {Set<number>} completedMissions */
-function saveProgress(wallet, purchased, completedMissions) {
+/** @param {number} wallet @param {Set<string>} purchased @param {Set<number>} completedMissions @param {Set<string>} staffUnlocked */
+function saveProgress(wallet, purchased, completedMissions, staffUnlocked) {
   try {
     /** @type {SaveData} */
     const data = {
@@ -93,6 +110,7 @@ function saveProgress(wallet, purchased, completedMissions) {
       wallet,
       purchased: [...purchased],
       completedMissions: [...completedMissions],
+      staff: [...staffUnlocked],
     };
     localStorage.setItem(SAVE_KEY, JSON.stringify(data));
   } catch {
@@ -119,11 +137,17 @@ export function createGame({ seed, ui, draw, reducedMotion = false, overlay = nu
   /** Which mission indices the player has completed. */
   /** @type {Set<number>} */
   const completedMissions = new Set(saved ? saved.completedMissions : []);
+  /** Staff NPCs the player has unlocked. */
+  /** @type {Set<string>} */
+  const staffUnlocked = new Set(saved ? saved.staff : []);
   /** Index into MISSIONS for the current or last-played mission (null = free play / intro). */
   /** @type {number | null} */
   let currentMission = null;
   /** Whether the last-completed mission was passed. Used by the overlay button to decide retry vs continue. */
   let lastMissionPassed = false;
+  /** NPC id waiting to be introduced in a cutscene, or null. */
+  /** @type {string | null} */
+  let pendingCutsceneStaff = null;
 
   /** @type {SimState} */
   let state = createInitialState({ seed });
@@ -158,7 +182,7 @@ export function createGame({ seed, ui, draw, reducedMotion = false, overlay = nu
   /** @type {{ x: number, y: number, moved: boolean } | null} */
   let dragOrigin = null;
   /** @type {ViewState} */
-  const view = { hoverId: null, flashes: new Map(), now: 0, service, drag: null, anim: createAnimator(), reducedMotion };
+  const view = { hoverId: null, flashes: new Map(), now: 0, service, drag: null, anim: createAnimator(), reducedMotion, staff: staffUnlocked };
   /** Manual stepping, for recordings: the frame loop draws but does not advance. */
   let manual = false;
   /** Time spent drawing, for performance checks: a ring of the last 240 frames, ms. */
@@ -254,6 +278,10 @@ export function createGame({ seed, ui, draw, reducedMotion = false, overlay = nu
           wallet += mission.reward;
           lines.push('');
           lines.push(`🎉 First clear bonus: +${mission.reward} coins!`);
+          const newNpc = NPC_STAFF[currentMission];
+          if (newNpc && !staffUnlocked.has(newNpc)) {
+            pendingCutsceneStaff = newNpc;
+          }
         }
         title = `✓ ${mission.name} — Complete!`;
       } else if (missionFailed) {
@@ -282,12 +310,24 @@ export function createGame({ seed, ui, draw, reducedMotion = false, overlay = nu
     lastMissionPassed = missionPassed;
 
     // Save after wallet/completion updates
-    saveProgress(wallet, purchased, completedMissions);
+    saveProgress(wallet, purchased, completedMissions, staffUnlocked);
 
     // Button: retry if failed, continue if passed
     const isMission = currentMission !== null;
     const button = isMission && !missionPassed ? 'Retry' : 'Continue';
     ui.showOverlay({ title, lines, button });
+  }
+
+  function showCutscene() {
+    const npcId = pendingCutsceneStaff;
+    if (!npcId) { showShop(); return; }
+    const info = NPC_INFO[npcId];
+    setPhase('cutscene');
+    ui.showOverlay({
+      title: `New Hire: ${info.name} (${info.role})`,
+      lines: ['', ...info.lines, '', 'Your team is growing. The next shift will be smoother.'],
+      button: 'Start Next Shift',
+    });
   }
 
   function showShop() {
@@ -325,7 +365,7 @@ export function createGame({ seed, ui, draw, reducedMotion = false, overlay = nu
     if (wallet < u.cost) return false;
     wallet -= u.cost;
     purchased.add(u.id);
-    saveProgress(wallet, purchased, completedMissions);
+    saveProgress(wallet, purchased, completedMissions, staffUnlocked);
     return true;
   }
 
@@ -353,8 +393,15 @@ export function createGame({ seed, ui, draw, reducedMotion = false, overlay = nu
             else if (kind === 'handOver') overlay.open('handoff', state);
           }
           break;
-        case 'actionCompleted':
+        case 'brewStarted':
+          if (overlay) overlay.open('espresso', state);
+          break;
+        case 'brewReady':
           if (overlay?.isOpen()) overlay.close();
+          break;
+        case 'actionCompleted':
+          // brewStart completion is handled by brewStarted/brewReady events
+          if (overlay?.isOpen() && String(e.kind) !== 'brewStart') overlay.close();
           break;
         case 'dishWashed':
           if (overlay?.isOpen()) overlay.close();
@@ -479,6 +526,23 @@ export function createGame({ seed, ui, draw, reducedMotion = false, overlay = nu
       state.timing.bakeLoad = Math.max(1, Math.round(state.timing.bakeLoad * 0.8));
       state.timing.bake = Math.max(1, Math.round(state.timing.bake * 0.8));
       state.timing.bakeUnload = Math.max(1, Math.round(state.timing.bakeUnload * 0.8));
+    }
+    // Apply NPC assist bonuses
+    if (staffUnlocked.has('barista')) {
+      state.timing.brew = Math.max(1, Math.round(state.timing.brew * 0.55));
+      state.timing.brewEspresso = Math.max(1, Math.round(state.timing.brewEspresso * 0.55));
+      state.timing.brewMocha = Math.max(1, Math.round(state.timing.brewMocha * 0.55));
+    }
+    if (staffUnlocked.has('baker')) {
+      state.timing.bakeLoad = Math.max(1, Math.round(state.timing.bakeLoad * 0.6));
+      state.timing.bake = Math.max(1, Math.round(state.timing.bake * 0.6));
+      state.timing.bakeUnload = Math.max(1, Math.round(state.timing.bakeUnload * 0.6));
+    }
+    if (staffUnlocked.has('dishwasher')) {
+      state.timing.washPerDish = Math.max(1, Math.round(state.timing.washPerDish * 0.5));
+    }
+    if (staffUnlocked.has('server')) {
+      state.timing.handOver = Math.max(1, Math.round(state.timing.handOver * 0.5));
     }
     pending = [];
     commandLog = [];
@@ -658,12 +722,19 @@ export function createGame({ seed, ui, draw, reducedMotion = false, overlay = nu
     overlayButton() {
       if (phase === 'paused') togglePause();
       else if (phase === 'ended') {
-        // After a mission: retry goes back to the same mission, continue goes to shop.
+        // After a mission: retry goes back to the same mission; on pass show cutscene (if new hire) then shop.
         if (currentMission !== null && !lastMissionPassed) {
           start(currentMission); // Retry the failed mission
+        } else if (pendingCutsceneStaff) {
+          showCutscene();
         } else {
           showShop();
         }
+      } else if (phase === 'cutscene') {
+        staffUnlocked.add(/** @type {string} */ (pendingCutsceneStaff));
+        pendingCutsceneStaff = null;
+        saveProgress(wallet, purchased, completedMissions, staffUnlocked);
+        showShop();
       } else if (phase === 'shop') {
         showMissionSelect(); // "Next Mission" button always goes to mission select.
       } else if (phase === 'missionSelect') {

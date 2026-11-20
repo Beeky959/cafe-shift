@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node tools/serve.mjs",
     "start:lan": "node tools/serve.mjs --lan",
+    "build": "echo 'No build step — static files are production-ready.'",
     "test": "node --test \"test/**/*.test.js\"",
     "typecheck": "tsc -p jsconfig.json",
     "verify": "node tools/verify-legacy.mjs",
