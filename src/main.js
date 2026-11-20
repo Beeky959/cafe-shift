@@ -8,6 +8,7 @@ import { createUi, element } from './ui/dom.js';
 import { createRenderer } from './view/renderer.js';
 import { areaForKey, hitTest } from './view/scene.js';
 import { createStationOverlay } from './view/station-overlay.js';
+import { toggleMute, isMuted, handleVisibilityChange } from './audio/index.js';
 
 /**
  * Optional development settings from the address bar:
@@ -141,7 +142,15 @@ function start() {
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) game.pauseIfPlaying();
+    handleVisibilityChange();
   });
+
+  // Mute button
+  const muteBtn = document.getElementById('mute-button');
+  if (muteBtn) {
+    const updateMuteLabel = () => { muteBtn.textContent = isMuted() ? '♪̶' : '♪'; };
+    muteBtn.addEventListener('click', () => { toggleMute(); updateMuteLabel(); });
+  }
 
   if (options.debug) {
     /** @type {any} */ (window).cafeShift = game.debug;

@@ -8,11 +8,12 @@
 /** @import { HitArea } from './view/scene.js' */
 /** @import { ViewState } from './view/renderer.js' */
 /** @import { Outcome } from './ui/service.js' */
-import { TICKS_PER_SECOND, MISSIONS, createInitialState, digest, resolveTap, step } from './sim/index.js';
+import { TICKS_PER_SECOND, MISSIONS, createInitialState, digest, resolveTap, step, makeNpcSlot } from './sim/index.js';
 import { createByte } from './ui/byte.js';
 import { rejectionText } from './ui/labels.js';
 import { createService } from './ui/service.js';
 import { createAnimator } from './view/animator.js';
+import * as Audio from './audio/index.js';
 
 const TICK_MS = 1000 / TICKS_PER_SECOND;
 /** Never try to catch up more than this much real time in one frame. */
@@ -185,6 +186,8 @@ export function createGame({ seed, ui, draw, reducedMotion = false, overlay = nu
   const view = { hoverId: null, flashes: new Map(), now: 0, service, drag: null, anim: createAnimator(), reducedMotion, staff: staffUnlocked };
   /** Manual stepping, for recordings: the frame loop draws but does not advance. */
   let manual = false;
+  /** Whether the AudioContext has been started (requires a user gesture). */
+  let audioStarted = false;
   /** Time spent drawing, for performance checks: a ring of the last 240 frames, ms. */
   const drawTimes = /** @type {number[]} */ ([]);
 
@@ -384,44 +387,79 @@ export function createGame({ seed, ui, draw, reducedMotion = false, overlay = nu
       switch (e.type) {
         case 'tapRejected':
           notice(rejectionText(String(e.reason)));
+          Audio.play('sfx_reject');
           break;
-        case 'actionStarted':
+        case 'actionStarted': {
+          const kind = String(e.kind);
           if (overlay) {
-            const kind = String(e.kind);
             if (kind === 'wash') overlay.open('sink', state);
             else if (kind === 'bakeLoad' || kind === 'bakeUnload') overlay.open('oven', state);
             else if (kind === 'handOver') overlay.open('handoff', state);
           }
+          if (kind === 'wash') Audio.startLoop('wash', 'sfx_wash_loop');
+          else if (kind === 'bakeLoad') Audio.startLoop('oven', 'sfx_oven_loop');
           break;
+        }
         case 'brewStarted':
           if (overlay) overlay.open('espresso', state);
+          Audio.startLoop('espresso', 'sfx_espresso_loop');
+          Audio.trigger(e.type, { order: String(e.order ?? ''), speaker: 'customer' });
           break;
         case 'brewReady':
           if (overlay?.isOpen()) overlay.close();
+          Audio.stopLoop('espresso');
+          Audio.play('sfx_brew_ready');
           break;
-        case 'actionCompleted':
-          // brewStart completion is handled by brewStarted/brewReady events
-          if (overlay?.isOpen() && String(e.kind) !== 'brewStart') overlay.close();
+        case 'actionCompleted': {
+          const kind = String(e.kind ?? '');
+          if (overlay?.isOpen() && kind !== 'brewStart') overlay.close();
+          if (kind === 'wash') Audio.stopLoop('wash');
+          else if (kind === 'bakeUnload') {
+            Audio.stopLoop('oven');
+            Audio.play('sfx_bake_ready');
+          }
           break;
+        }
         case 'dishWashed':
           if (overlay?.isOpen()) overlay.close();
+          Audio.play('sfx_dish_clink');
+          break;
+        case 'guestArrived':
+          Audio.play('sfx_door_chime');
+          Audio.trigger(e.type, { speaker: 'customer' });
+          Audio.updateFromGuestCount(state.guests.filter((g) => g.place.kind === 'spot').length);
+          break;
+        case 'guestAsked':
+          Audio.trigger(e.type, { topic: String(e.topic ?? ''), speaker: 'customer' });
           break;
         case 'guestUsingStand':
           if (overlay && state.stand.installed) overlay.open('tapit', state);
+          Audio.play('sfx_tapit_tap');
           break;
         case 'standAnswered':
           if (overlay?.isOpen()) overlay.close();
+          Audio.play('sfx_tapit_success');
           break;
         case 'itemHandedOver':
           if (overlay?.isOpen()) overlay.close();
-          // The completed transaction: the ticket is stamped.
           if (was && was.spot !== null) ui.receipt(was.spot, `Paid +${e.coins}`, view.now + 1500);
+          Audio.play('sfx_handoff');
+          Audio.trigger(e.type, { speaker: 'customer' });
+          Audio.updateFromGuestCount(state.guests.filter((g) => g.place.kind === 'spot').length);
           break;
         case 'questionAnswered':
           questionsAnswered += 1;
+          Audio.play('sfx_button');
+          break;
+        case 'guestLeftHappy':
+          Audio.play('sfx_door_chime');
+          Audio.updateFromGuestCount(state.guests.filter((g) => g.place.kind === 'spot').length);
           break;
         case 'guestLeftUnhappy':
           if (was && was.spot !== null) ui.receipt(was.spot, 'Walked out', view.now + 1500);
+          Audio.play('sfx_guest_unhappy');
+          Audio.triggerByte('byte_warning', e.type);
+          Audio.updateFromGuestCount(state.guests.filter((g) => g.place.kind === 'spot').length);
           break;
         default:
           break;
@@ -544,6 +582,10 @@ export function createGame({ seed, ui, draw, reducedMotion = false, overlay = nu
     if (staffUnlocked.has('server')) {
       state.timing.handOver = Math.max(1, Math.round(state.timing.handOver * 0.5));
     }
+    // Activate NPC autonomous action slots for each unlocked staff member
+    for (const role of staffUnlocked) {
+      state.npcs[role] = makeNpcSlot();
+    }
     pending = [];
     commandLog = [];
     service = createService();
@@ -560,6 +602,9 @@ export function createGame({ seed, ui, draw, reducedMotion = false, overlay = nu
     ui.say('', 'neutral');
     ui.showOverlay(null);
     ui.setData('finalDigest', '');
+    // Reset dialogue cooldowns and start ambient sound
+    Audio.dialogueReset();
+    Audio.schedulerStart();
     setPhase('playing');
   }
 
@@ -591,6 +636,11 @@ export function createGame({ seed, ui, draw, reducedMotion = false, overlay = nu
     /** Starts the frame loop and shows the intro. */
     boot() {
       ui.setData('initialDigest', digest(state));
+      // Wire subtitle display through Byte's say UI.
+      Audio.onSubtitleChange((entry) => {
+        if (entry) ui.say(`"${entry.text}"`, 'neutral');
+        else ui.say(byteLine.text, byteLine.mood);
+      });
       setPhase('intro');
       showIntro();
       lastFrame = performance.now();
@@ -603,9 +653,11 @@ export function createGame({ seed, ui, draw, reducedMotion = false, overlay = nu
      */
     press(area) {
       if (phase !== 'playing') return;
+      if (!audioStarted) { audioStarted = true; Audio.init(); Audio.registerReadyAssets(); }
       const last = lastPress.get(area.id) ?? -Infinity;
       if (view.now - last < DEBOUNCE_MS) return;
       lastPress.set(area.id, view.now);
+      Audio.play('sfx_button', { cooldownMs: 120 });
       inputCount += 1;
       const t = area.target;
       if (t.kind === 'machine' || t.kind === 'case') {
@@ -720,6 +772,8 @@ export function createGame({ seed, ui, draw, reducedMotion = false, overlay = nu
     },
 
     overlayButton() {
+      if (!audioStarted) { audioStarted = true; Audio.init(); Audio.registerReadyAssets(); }
+      Audio.play('sfx_button', { cooldownMs: 120 });
       if (phase === 'paused') togglePause();
       else if (phase === 'ended') {
         // After a mission: retry goes back to the same mission; on pass show cutscene (if new hire) then shop.
