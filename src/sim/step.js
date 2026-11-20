@@ -886,6 +886,230 @@ function endShift(state, emit) {
 }
 
 /**
+ * Makes a fresh idle NPC slot.
+ * @returns {import('./types.js').NpcSlot}
+ */
+export function makeNpcSlot() {
+  return { ticksLeft: 0, busy: false, action: null, targetGuestId: null };
+}
+
+/**
+ * Autonomous NPC logic — each NPC finds the best thing to do and counts down.
+ * NPCs never conflict with each other and never block the player.
+ * They use the same timing values as the owner but skip the travel phase.
+ *
+ * Maya (barista):  starts a brew if machine has an empty slot + rack dish + drink needed.
+ * Carlos (baker):  loads the oven when empty + pastry stock low; unloads when ready.
+ * Sam (dishwasher): washes one dish from the sink when idle.
+ * Zoe (server):    hands an unclaimed ready item to an unattended waiting guest.
+ * @param {SimState} state
+ * @param {Emit} emit
+ */
+function stepNpcs(state, emit) {
+  const npcs = state.npcs;
+  const t = state.timing;
+
+  // ---- Maya: barista ----
+  if (npcs.barista) {
+    const npc = npcs.barista;
+    if (npc.busy) {
+      npc.ticksLeft -= 1;
+      if (npc.ticksLeft <= 0) {
+        // Brew started — pick drink type, start the slot
+        const slot = state.machine.slots.findIndex((s) => s.state === 'empty' && s.claimedBy === null);
+        const dish = firstDishIn(state, 'rack');
+        if (slot !== -1 && dish) {
+          const drinkType = pickDrinkToBrew(state);
+          dish.holder = { kind: 'machine', slot };
+          state.machine.slots[slot].state = 'brewing';
+          state.machine.slots[slot].dishId = dish.id;
+          state.machine.slots[slot].drink = drinkType;
+          const brewTime = drinkType === 'espresso' ? t.brewEspresso
+            : drinkType === 'mocha' ? t.brewMocha : t.brew;
+          state.machine.slots[slot].ticksLeft = brewTime;
+          emit('brewStarted', { slot, drink: drinkType, npc: 'barista' });
+        }
+        npc.busy = false;
+        npc.action = null;
+      }
+    } else {
+      // Decide: brew if there's demand, a free slot, and a rack dish
+      const needsDrink = state.guests.some((g) => {
+        if (g.state !== 'waiting' && g.state !== 'walkingIn') return false;
+        const spec = specOf(state, g.id);
+        return isDrink(spec.order);
+      });
+      const freeSlot = state.machine.slots.some((s) => s.state === 'empty' && s.claimedBy === null);
+      const hasDish = !!firstDishIn(state, 'rack');
+      if (needsDrink && freeSlot && hasDish) {
+        npc.busy = true;
+        npc.action = 'brew';
+        npc.ticksLeft = t.brewStart;
+        emit('npcAction', { npc: 'barista', action: 'brew' });
+      }
+    }
+  }
+
+  // ---- Carlos: baker ----
+  if (npcs.baker) {
+    const npc = npcs.baker;
+    if (npc.busy) {
+      npc.ticksLeft -= 1;
+      if (npc.ticksLeft <= 0) {
+        if (npc.action === 'bakeLoad') {
+          state.oven.state = 'baking';
+          state.oven.ticksLeft = t.bake;
+          state.oven.claimedBy = null;
+          emit('bakeStarted', { npc: 'baker' });
+        } else if (npc.action === 'bakeUnload') {
+          const added = Math.min(CONFIG.pastryBatchSize, state.pastryStock.maxDisplay - state.pastryStock.display);
+          state.pastryStock.display += added;
+          state.oven.state = 'empty';
+          state.oven.ticksLeft = 0;
+          state.oven.claimedBy = null;
+          emit('bakeUnloaded', { added, stockNow: state.pastryStock.display, npc: 'baker' });
+        }
+        npc.busy = false;
+        npc.action = null;
+      }
+    } else {
+      const oven = state.oven;
+      if (oven.state === 'ready' && oven.claimedBy === null) {
+        npc.busy = true;
+        npc.action = 'bakeUnload';
+        npc.ticksLeft = t.bakeUnload;
+        oven.claimedBy = -1; // sentinel: claimed by NPC
+        emit('npcAction', { npc: 'baker', action: 'bakeUnload' });
+      } else if (oven.state === 'empty' && oven.claimedBy === null && state.pastryStock.display < state.pastryStock.maxDisplay) {
+        npc.busy = true;
+        npc.action = 'bakeLoad';
+        npc.ticksLeft = t.bakeLoad;
+        oven.claimedBy = -1;
+        emit('npcAction', { npc: 'baker', action: 'bakeLoad' });
+      }
+    }
+  }
+
+  // ---- Sam: dishwasher ----
+  if (npcs.dishwasher) {
+    const npc = npcs.dishwasher;
+    if (npc.busy) {
+      npc.ticksLeft -= 1;
+      if (npc.ticksLeft <= 0) {
+        // Finish washing: move dish to rack
+        const dish = firstDishIn(state, 'sink');
+        if (dish) {
+          dish.holder = { kind: 'rack' };
+          emit('dishWashed', { dishId: dish.id, npc: 'dishwasher' });
+        }
+        // Chain: keep washing if more dishes and owner not washing
+        const nextDish = firstDishIn(state, 'sink');
+        if (nextDish && state.owner.action?.kind !== 'wash') {
+          npc.ticksLeft = t.washPerDish;
+          emit('npcAction', { npc: 'dishwasher', action: 'wash' });
+        } else {
+          npc.busy = false;
+          npc.action = null;
+        }
+      }
+    } else {
+      const hasDirty = !!firstDishIn(state, 'sink');
+      const ownerWashing = state.owner.action?.kind === 'wash';
+      if (hasDirty && !ownerWashing) {
+        npc.busy = true;
+        npc.action = 'wash';
+        npc.ticksLeft = t.washPerDish;
+        emit('npcAction', { npc: 'dishwasher', action: 'wash' });
+      }
+    }
+  }
+
+  // ---- Zoe: server ----
+  if (npcs.server) {
+    const npc = npcs.server;
+    if (npc.busy) {
+      npc.ticksLeft -= 1;
+      if (npc.ticksLeft <= 0) {
+        const guestId = npc.targetGuestId;
+        const guest = guestId !== null ? state.guests.find((g) => g.id === guestId) : null;
+        if (guest && guest.state === 'waiting' && guest.attendedBy === null) {
+          const spec = specOf(state, guest.id);
+          const item = findReadyItem(state, spec.order);
+          if (item) {
+            // Complete handover
+            /** @type {number} */
+            let dishId;
+            if (item.slot !== null) {
+              const slot = state.machine.slots[item.slot];
+              dishId = /** @type {number} */ (slot.dishId);
+              slot.state = 'empty';
+              slot.dishId = null;
+              slot.drink = null;
+              slot.claimedBy = null;
+            } else {
+              dishId = /** @type {number} */ (state.pass.dishId);
+              state.pass.dishId = null;
+              state.pass.claimedBy = null;
+            }
+            dishOf(state, dishId).holder = { kind: 'guest', guestId: guest.id };
+            guest.dishId = dishId;
+            guest.attendedBy = null;
+            const personalPatience = t.counterPatience * CONFIG.personalityPatience[spec.personality];
+            guest.tipEligible = guest.patienceLeft > personalPatience * CONFIG.tipPatienceFraction;
+            const price = CONFIG.prices[spec.order];
+            state.economy.grossEarnings += price;
+            state.economy.wallet += price;
+            state.metrics.guests.served += 1;
+            emit('itemHandedOver', { guestId: guest.id, item: spec.order, coins: price, npc: 'server' });
+            if (spec.question) {
+              if (state.stand.installed && spec.question.supported && spec.usesStandIfPresent) {
+                if (guest.place.kind === 'spot') state.spots[guest.place.index] = null;
+                guest.place = { kind: 'stand' };
+                guest.state = 'walkingToStand';
+                guest.timerLeft = t.walkToStand;
+                state.stand.queue.push(guest.id);
+                emit('guestToStand', { guestId: guest.id, topic: spec.question.topic });
+              } else {
+                guest.state = 'asking';
+                guest.patienceLeft = Math.round(t.askingPatience * CONFIG.personalityPatience[spec.personality]);
+                emit('guestAsked', { guestId: guest.id, topic: spec.question.topic });
+              }
+            } else {
+              leaveCounter(state, guest, emit);
+            }
+          }
+        }
+        npc.busy = false;
+        npc.action = null;
+        npc.targetGuestId = null;
+      }
+    } else {
+      // Find a waiting guest whose item is ready and unclaimed, not currently attended by owner
+      for (const guest of state.guests) {
+        if (guest.state !== 'waiting' || guest.attendedBy !== null) continue;
+        const spec = specOf(state, guest.id);
+        const item = findReadyItem(state, spec.order);
+        if (!item) continue;
+        // Don't steal an item the owner is mid-way through handing over
+        const ownerHandingOver = state.owner.action?.kind === 'handOver' &&
+          state.owner.action.claims.guestId === guest.id;
+        if (ownerHandingOver) continue;
+        // Claim the item and guest
+        guest.attendedBy = -1; // sentinel: claimed by Zoe
+        if (item.slot !== null) state.machine.slots[item.slot].claimedBy = -1;
+        if (item.pass) state.pass.claimedBy = -1;
+        npc.busy = true;
+        npc.action = 'handOver';
+        npc.targetGuestId = guest.id;
+        npc.ticksLeft = t.handOver;
+        emit('npcAction', { npc: 'server', action: 'handOver', guestId: guest.id });
+        break;
+      }
+    }
+  }
+}
+
+/**
  * Advances `state` by one tick, in place.
  * @param {SimState} state
  * @param {readonly Command[]} [commands] Player input for this tick, in the order received.
@@ -909,6 +1133,7 @@ export function step(state, commands = []) {
   const freshBrews = new Set();
   const ovenWasBaking = state.oven.state === 'baking';
   stepOwner(state, emit, freshBrews); // 2
+  stepNpcs(state, emit); // 2b — autonomous NPC actions
   // freshBake = oven just switched from non-baking to baking on this tick
   const freshBake = !ovenWasBaking && state.oven.state === 'baking';
   stepMachine(state, emit, freshBrews); // 3

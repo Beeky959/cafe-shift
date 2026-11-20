@@ -119,6 +119,7 @@ export function createInitialState(options = {}) {
     pass: { dishId: null, claimedBy: null },
     stand: { installed: CONFIG.presets[preset].standInstalled, userId: null, queue: [] },
     owner: { zone: CONFIG.ownerStartZone, action: null, queue: [], nextActionId: 1 },
+    npcs: {},
     economy: {
       startingWallet: CONFIG.startingWallet,
       grossEarnings: 0,

@@ -218,6 +218,15 @@
  */
 
 /**
+ * One NPC's autonomous action slot. Counts down independently of the owner.
+ * @typedef {object} NpcSlot
+ * @property {number} ticksLeft Ticks remaining in the current action (0 = idle).
+ * @property {boolean} busy True while the NPC is performing an action.
+ * @property {string | null} action Label of the current action, e.g. 'brew', 'wash'.
+ * @property {number | null} targetGuestId Guest being served (Zoe only).
+ */
+
+/**
  * The whole simulation state: plain JSON-serialisable data, no functions,
  * no DOM, no clock.
  * @typedef {object} SimState
@@ -244,6 +253,7 @@
  * @property {Owner} owner
  * @property {Economy} economy
  * @property {Metrics} metrics
+ * @property {Record<string, NpcSlot>} npcs Active NPC slots keyed by role ('barista', 'baker', 'dishwasher', 'server').
  */
 
 /**

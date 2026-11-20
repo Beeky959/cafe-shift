@@ -8,7 +8,7 @@
 /** @import { HitArea } from './view/scene.js' */
 /** @import { ViewState } from './view/renderer.js' */
 /** @import { Outcome } from './ui/service.js' */
-import { TICKS_PER_SECOND, MISSIONS, createInitialState, digest, resolveTap, step } from './sim/index.js';
+import { TICKS_PER_SECOND, MISSIONS, createInitialState, digest, resolveTap, step, makeNpcSlot } from './sim/index.js';
 import { createByte } from './ui/byte.js';
 import { rejectionText } from './ui/labels.js';
 import { createService } from './ui/service.js';
@@ -581,6 +581,10 @@ export function createGame({ seed, ui, draw, reducedMotion = false, overlay = nu
     }
     if (staffUnlocked.has('server')) {
       state.timing.handOver = Math.max(1, Math.round(state.timing.handOver * 0.5));
+    }
+    // Activate NPC autonomous action slots for each unlocked staff member
+    for (const role of staffUnlocked) {
+      state.npcs[role] = makeNpcSlot();
     }
     pending = [];
     commandLog = [];
